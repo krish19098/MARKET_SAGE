@@ -1,0 +1,3 @@
+date,kind,note
+# Populate from official NSE/BSE holiday circulars. Rows: <date>,holiday,<name> | <yyyy-01-01>,verified_year,<circular ref> | <date>,special_session,HH:MM-HH:MM
+# No holidays are pre-filled: values must come from the exchange circular, not from memory.

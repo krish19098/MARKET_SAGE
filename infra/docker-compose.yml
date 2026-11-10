@@ -1,0 +1,32 @@
+# Single-VM deployment: PostgreSQL + API (serves the PWA) + worker (scheduler + monitor).
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: market_sage
+      POSTGRES_DB: market_sage
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in .env}
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U market_sage"]
+      interval: 10s
+      retries: 5
+  api:
+    build: {context: .., dockerfile: infra/Dockerfile}
+    restart: unless-stopped
+    env_file: .env
+    command: ["sh", "-c", "market-sage migrate && uvicorn market_sage.api.app:app --host 0.0.0.0 --port 8000"]
+    ports: ["127.0.0.1:8000:8000"]
+    volumes: [msdata:/data]
+    depends_on: {db: {condition: service_healthy}}
+  worker:
+    build: {context: .., dockerfile: infra/Dockerfile}
+    restart: unless-stopped
+    env_file: .env
+    command: ["market-sage", "worker"]
+    volumes: [msdata:/data]
+    depends_on: {db: {condition: service_healthy}, api: {condition: service_started}}
+volumes:
+  pgdata: {}
+  msdata: {}
