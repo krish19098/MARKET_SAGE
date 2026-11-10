@@ -94,6 +94,7 @@ def allocate(
     sectors: dict[int, str | None],
     returns: pd.DataFrame | None = None,
     holdings: list[Holding] | None = None,
+    committed_capital: float = 0.0,
 ) -> Allocation:
     if capital <= 0 or not math.isfinite(capital):
         raise ValueError("capital must be a positive amount")
@@ -110,7 +111,8 @@ def allocate(
         if r not in buys:
             rejected.append({"symbol": r.symbol, "reason": "; ".join(r.reasons) or "not a BUY"})
     buys.sort(key=lambda r: r.quality_score or 0.0, reverse=True)
-    deployable = capital * (1 - settings.min_cash_reserve_pct)
+    # ``committed_capital``: part of ``capital`` already invested (e.g. open paper positions of the same book)
+    deployable = capital * (1 - settings.min_cash_reserve_pct) - committed_capital
     cash = deployable
     sector_val: dict[str, float] = {}
     for h in holdings:

@@ -116,7 +116,13 @@ class SyntheticMarket:
                     planted = self.planted_signal * 0.0025 * np.tanh(z)
                 idio[t] = 0.08 * idio[t - 1] + eps[t] + planted
             r = st.beta * mkt + sector_ret[st.sector] + idio
-            close = st.base_price * np.exp(np.cumsum(r))
+            # weak mean reversion of the log price level keeps synthetic prices in a realistic range
+            lp = np.empty(n)
+            lp[0] = r[0]
+            for t in range(1, n):
+                lp[t] = lp[t - 1] + r[t] - 0.004 * lp[t - 1]
+            r = np.diff(np.concatenate([[0.0], lp]))
+            close = st.base_price * np.exp(lp)
             frames[st.symbol] = self._ohlcv(st.symbol, sessions, close, r, rng, received)
         idx_close = 10000 * np.exp(np.cumsum(mkt))
         frames[INDEX_SYMBOL] = self._ohlcv(INDEX_SYMBOL, sessions, idx_close, mkt, rng, received, index=True)

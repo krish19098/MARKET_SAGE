@@ -62,7 +62,11 @@ class DecisionPipeline:
         settings: RiskSettings,
         instrument_ids: list[int] | None = None,
         record: bool = True,
+        created_at: datetime | None = None,
+        provenance_extra: dict | None = None,
     ) -> PipelineResult:
+        """``now`` is the as-of time for data-freshness checks; ``created_at`` (default: wall clock) is the
+        immutable creation timestamp written to the ledger, so replays never back-date records."""
         mctx = self.model_ctx()
         ids = instrument_ids or [i["id"] for i in self.mds.instruments.all(include_indices=False)]
         pool = self.store.universe_features(until=cutoff)
@@ -74,7 +78,7 @@ class DecisionPipeline:
                 continue
             recs.append(rec)
             if record:
-                pids[iid] = self.record(rec, cutoff, now, settings)
+                pids[iid] = self.record(rec, cutoff, created_at or utcnow(), settings, extra=provenance_extra)
         return PipelineResult(cutoff, recs, pids, mctx.skill_note)
 
     def evaluate(
@@ -104,7 +108,13 @@ class DecisionPipeline:
         )
 
     def record(
-        self, rec: Recommendation, cutoff: date, now: datetime, settings: RiskSettings, parent: str | None = None
+        self,
+        rec: Recommendation,
+        cutoff: date,
+        now: datetime,
+        settings: RiskSettings,
+        parent: str | None = None,
+        extra: dict | None = None,
     ) -> str:
         inst = self.mds.instruments.get(rec.instrument_id)
         assert inst is not None
@@ -118,6 +128,7 @@ class DecisionPipeline:
             "synthetic": bool((bars["provider"] == "fixture").any()),
             "costs_schedule": self.costs.version,
             "costs_verified": self.costs.verified,
+            **(extra or {}),
         }
         return self.ledger.record(
             {

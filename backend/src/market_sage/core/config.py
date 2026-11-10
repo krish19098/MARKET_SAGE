@@ -41,6 +41,13 @@ class Settings(BaseSettings):
     vapid_private_key: SecretStr | None = None
     vapid_subject: str = "mailto:owner@localhost"
 
+    # Data source mode: "nse" (official archives + Angel One live when configured) or "fixture" (SYNTHETIC demo).
+    data_mode: str = "nse"
+    heartbeat_url: str | None = None  # dead-man's-switch ping (e.g. healthchecks.io) from the worker
+    paper_auto_follow: bool = True     # simulate paper entries for BUY recommendations automatically
+    paper_capital: float = 100000.0
+    paper_mode: str = "balanced"
+
     # Data freshness: maximum age (seconds) of live quotes before they are considered stale.
     live_stale_after_s: int = 120
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173"])
