@@ -137,7 +137,8 @@ backend/
   src/market_sage/
     core/           config, clock & IST/UTC handling, exchange calendar, ids, provenance
     data/
-      providers/    adapter per source (nse_archive, bse_archive, dhan, kite, upstox, fixture)
+      providers/    adapter per source behind broker-independent protocols
+                    (nse_archive, bse_archive, angelone, fixture; dhan/kite/upstox/vendor later)
       raw/          L0 immutable landing + checksums
       canonical/    L1 normalisation, instrument master, symbol history
       adjust/       L2 corporate-action adjustment
@@ -147,6 +148,7 @@ backend/
     models/         targets, baselines, training, walk_forward, calibration, registry
     decision/       thesis, suppression gate, trade plan, recommendation
     portfolio/      costs, sizing, allocator, exposure/correlation
+    execution/      PaperBroker only (simulated fills); no live-order adapter exists
     ledger/         append-only predictions, events, alerts, outcomes, corrections
     monitoring/     feed consumer, position/watchlist state machines, alert rules
     notifications/  web push, delivery log, retries
@@ -186,6 +188,25 @@ docs/               this document, provider research, model cards, runbooks
   never silently filled; each feature declares how it handles gaps.
 - **Live vs final:** live ticks/candles stored separately from finalised candles; post-session
   reconciliation against provider history; feed latency and staleness recorded.
+
+### 5.2a Broker-independent provider layer and execution policy (D1)
+Full rationale is in `docs/DECISION_BRIEF_D1-D7.md` §D1.4.
+- Analytical engines consume only canonical objects (`Bar`, `Quote`, `Tick`,
+  `CorporateAction`, `Holding`) keyed by internal `instrument_id` with UTC timestamps.
+  They never see broker tokens, payloads or limits.
+- Provider protocols: `ProviderCapabilities` (limits declared as data), `InstrumentSource`,
+  `HistoricalBarSource`, `LiveFeedSource`, `AccountSource` (read-only), `SessionManager`.
+- `provider_instrument_map` (`provider, provider_token, exchange, symbol, isin, valid_from,
+  valid_to → instrument_id`) isolates symbol/token schemes. Adding DhanHQ/Kite/Upstox later
+  means adding an adapter plus mapping rows.
+- `MarketDataService` routes by **data role** (EOD, delivery, corporate actions, universe,
+  intraday, live, holdings, fundamentals) using a config table. It applies capability-aware
+  chunking, per-provider rate limiting, provenance stamping and cross-provider reconciliation.
+- Provider candles are stored unadjusted. Adjustment is always computed by L2 from exchange
+  corporate-action data.
+- **Execution disabled:** the only `ExecutionVenue` is `PaperBroker`. `EXECUTION_MODE` must be
+  `paper` or startup fails. A build test fails if order/GTT endpoints are referenced in the
+  codebase. Broker keys are requested with data-only scope where the broker supports it.
 
 ### 5.3 Analysis engines (analyst intelligence)
 Each engine returns typed **evidence objects**: `{kind: fact|inference|estimate|unknown,
@@ -343,7 +364,7 @@ marked complete in `PROJECT_STATE.md` with test evidence.
 | # | Milestone | Key deliverables | Exit criteria | External dependency |
 |---|---|---|---|---|
 | **M0** | Foundation | Repo layout, `uv` project, lint/type/test tooling, CI, docker-compose Postgres, Alembic baseline, config & secrets handling, `Clock`/IST utilities | CI green; secret-scan test in place | None |
-| **M1** | Data provider research | Provider comparison (NSE/BSE archives, DhanHQ, Kite Connect, Upstox, commercial), licensing/redistribution notes, credentials checklist, coverage matrix | Owner selects provider(s) | Owner decision; current provider docs |
+| **M1** | Data provider verification | Initial comparison done (`docs/DECISION_BRIEF_D1-D7.md`). M1 re-verifies Angel SmartAPI limits/depth/adjustment and NSE/BSE file formats against live docs **and test calls**; licensing notes, credentials checklist, coverage matrix | Verified capability declarations for Angel + NSE adapters | Hosts allowed (D2); Angel credentials on owner's machine |
 | **M2** | Instrument master, calendar, EOD ingestion | Instrument/symbol history, calendar, NSE bhavcopy adapter (+ fixture adapter), L0/L1 storage, quality engine & report, corporate actions & L2 adjustment | Backfill of real EOD data with quality report; gaps flagged | Network access to NSE archives |
 | **M3** | Point-in-time feature store | Feature definitions with availability rules, snapshot store, leakage tests | Replay test proves no future data in any feature | M2 data |
 | **M4** | Analysis engines | Technical, indicators (reference-tested), patterns with base rates, volume/liquidity, market context/regime, fundamentals (PIT), evidence objects, thesis builder | Thesis generated for real instruments with traceable evidence | Fundamentals source (M1) |
@@ -367,10 +388,10 @@ live monitoring (M9) depend on a broker data feed and are layered on afterwards.
 
 | # | Decision / dependency | Why it matters | Recommendation |
 |---|---|---|---|
-| D1 | **Primary data source for history and live feed** (DhanHQ, Kite Connect, Upstox, or commercial) and acceptable monthly cost | Determines intraday depth, live feed, licensing; some are paid | Official NSE/BSE archives for EOD history first; choose one broker API you already hold an account with for intraday/live. I will verify current terms in M1 before any integration. |
-| D2 | **Network access in this cloud environment** to `www.nseindia.com`, `nsearchives.nseindia.com` (and BSE equivalents) | Currently blocked (HTTP 403 from proxy); real ingestion cannot be tested here | Allow these hosts when we reach M2, or run ingestion from your own machine/server. |
+| D1 | **Data sources and broker integration** — *updated 2026-11-11, pending final approval* | Determines intraday depth, live feed, licensing, cost | **Angel One SmartAPI** (free; owner's broker) as the initial integration for live WebSocket quotes, recent intraday history, instrument tokens and optional read-only holdings. **NSE/BSE official files** as source of record for EOD OHLCV, delivery %, corporate actions and the survivorship-free universe. Holdings by manual entry first. No paid provider initially; DhanHQ (5-year intraday, ~₹499/month) is the first add-on candidate. Everything sits behind broker-independent adapters (§5.2a). Real-money execution disabled. Angel figures still need verification in M1. Details: `docs/DECISION_BRIEF_D1-D7.md`. |
+| D2 | **Network access in this cloud environment** (see brief §D2: hybrid recommended) to `www.nseindia.com`, `nsearchives.nseindia.com` (and BSE equivalents) | Currently blocked (HTTP 403 from proxy); real ingestion cannot be tested here | Allow these hosts when we reach M2, or run ingestion from your own machine/server. |
 | D3 | **Fundamentals source with publication timestamps** | Point-in-time fundamentals are required and hard to source free | Evaluate exchange filings (XBRL/announcements) vs a licensed provider in M1. |
-| D4 | **Intended audience: personal use vs offering to others** | Distributing research/recommendations may fall under SEBI (Research Analyst / Investment Adviser) regulations | Build as personal decision support first; legal review before any distribution. |
+| D4 | **Intended audience** — *decided: personal use + paper trading* | Distributing research may fall under SEBI RA/IA regulations; order flow falls under retail-algo rules | Personal decision support only; no order execution; legal review before any sharing or execution. |
 | D5 | **Deployment host** for the always-on backend | Monitoring must run when devices are off | Small VPS / cloud VM with docker-compose; decide by M9. |
 | D6 | **Frontend framework** | React + Vite vs Next.js | React + Vite PWA. |
 | D7 | **Risk defaults** (per-trade risk %, max positions, daily loss limit, sector caps) | Directly affects capital at risk | Conservative defaults (e.g. ≤1% of capital at stop per trade), user-configurable; you confirm before M7. |
