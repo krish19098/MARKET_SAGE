@@ -41,34 +41,22 @@ def detect_setups(f: pd.DataFrame) -> list[Setup]:
     vr = float(r.get("vol_ratio20", np.nan))
     vc = float(r.get("vol_contraction", np.nan))
 
-    # Breakout lifecycle
-    recent_break = (f["close"].iloc[-4:-1] > f["high"].shift(1).rolling(20).max().iloc[-4:-1]).any()
+    # Breakout lifecycle. Invalidation is measured against the level that was actually broken
+    # (the prior 20-session high at the breakout bar), not the new high created by the breakout.
+    prior_hi = f["high"].shift(1).rolling(20).max()
+    broke = (f["close"] > prior_hi).iloc[-4:-1]
+    broken_level = float(prior_hi.iloc[-4:-1][broke].iloc[-1]) if broke.any() else None
     if c > hi20:
         stage = "confirmed" if vr >= 1.5 else "developing"
-        out.append(
-            Setup(
-                "breakout",
-                "bullish",
-                stage,
-                hi20,
-                hi20 - a,
-                f"close {c:.2f} above 20-session high {hi20:.2f}, volume {vr:.1f}x",
-            )
-        )
-    elif recent_break and c < hi20 - 0.25 * a:
-        out.append(Setup("breakout", "bullish", "invalidated", hi20, None, "failed breakout: closed back below level"))
+        out.append(Setup("breakout", "bullish", stage, hi20, hi20 - a,
+                         f"close {c:.2f} above 20-session high {hi20:.2f}, volume {vr:.1f}x"))
+    elif broken_level is not None and c < broken_level - 0.25 * a:
+        out.append(Setup("breakout", "bullish", "invalidated", broken_level, None,
+                         f"failed breakout: closed back below broken level {broken_level:.2f}"))
     elif hi20 - c <= 0.5 * a:
         extra = " with volatility contraction" if np.isfinite(vc) and vc < 0.8 else ""
-        out.append(
-            Setup(
-                "breakout",
-                "bullish",
-                "early",
-                hi20,
-                c - 1.5 * a,
-                f"price within 0.5 ATR of 20-session high {hi20:.2f}{extra}",
-            )
-        )
+        out.append(Setup("breakout", "bullish", "early", hi20, c - 1.5 * a,
+                         f"price within 0.5 ATR of 20-session high {hi20:.2f}{extra}"))
 
     # Breakdown lifecycle (risk for holders)
     if c < lo20:

@@ -48,8 +48,7 @@ def decision_job(c: Container, cutoff: date, now: datetime, created_at: datetime
 
 def paper_follow_job(c: Container, cutoff: date, prediction_ids: dict[int, str]) -> list[str]:
     """Record paper-entry intents for BUYs, sized by the allocator on the configured paper capital."""
-    preds = [c.ledger.get(pid) for pid in prediction_ids.values()]
-    preds = [p for p in preds if p is not None]
+    preds = [p for p in (c.ledger.get(pid) for pid in prediction_ids.values()) if p is not None]
     recs = [recommendation_from_ledger(p) for p in preds]
     sectors = {i["id"]: i["sector"] for i in c.mds.instruments.all()}
     open_paper = c.positions.list("open", kind="paper")

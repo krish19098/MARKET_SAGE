@@ -11,7 +11,7 @@ from datetime import date, datetime, time
 from market_sage.core.timeutil import IST, utcnow
 
 
-def _container():  # type: ignore[no-untyped-def]
+def _container():
     from market_sage.container import Container
 
     return Container.build()
@@ -82,6 +82,11 @@ def cmd_verify_ledger(_: argparse.Namespace) -> None:
     sys.exit(1 if problems else 0)
 
 
+def cmd_rollback_model(_: argparse.Namespace) -> None:
+    restored = _container().registry.rollback("tb5_atr")
+    print(f"restored model id {restored}" if restored else "no retired model available to restore")
+
+
 def cmd_worker(_: argparse.Namespace) -> None:
     from market_sage.workers.scheduler import run_worker
 
@@ -137,7 +142,8 @@ def main(argv: list[str] | None = None) -> None:
     sub = p.add_subparsers(dest="cmd", required=True)
     for name, fn in [("migrate", cmd_migrate), ("hash-password", cmd_hash_password), ("totp-secret", cmd_totp_secret),
                      ("vapid-keys", cmd_vapid_keys), ("post-close", cmd_post_close), ("learn", cmd_learn),
-                     ("verify-ledger", cmd_verify_ledger), ("worker", cmd_worker)]:
+                     ("verify-ledger", cmd_verify_ledger), ("worker", cmd_worker),
+                     ("rollback-model", cmd_rollback_model)]:
         sub.add_parser(name).set_defaults(fn=fn)
     ing = sub.add_parser("ingest-nse", help="ingest NSE full bhavcopy (with delivery) for a date range")
     ing.add_argument("start")

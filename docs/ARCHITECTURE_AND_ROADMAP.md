@@ -1,7 +1,8 @@
 # MARKET SAGE — Product Architecture and Implementation Roadmap
 
-> **Status: PROPOSAL awaiting owner review.** Nothing described here is implemented yet.
-> The live record of what actually exists is `PROJECT_STATE.md`. The authoritative
+> **Status: ACCEPTED and implemented through M11; M12 partially complete** (owner authorised full development
+> on 2026-11-11; decisions D1–D7 adopted as recommended in `DECISION_BRIEF_D1-D7.md`).
+> The live record of what actually exists, what is verified and what is blocked is `PROJECT_STATE.md`. The authoritative
 > requirements are in `.claude/skills/market-sage/references/`.
 
 ---
@@ -384,7 +385,7 @@ live monitoring (M9) depend on a broker data feed and are layered on afterwards.
 
 ---
 
-## 8. Dependencies, blockers and decisions needed from you
+## 8. Dependencies, blockers and decisions (adopted 2026-11-11)
 
 | # | Decision / dependency | Why it matters | Recommendation |
 |---|---|---|---|

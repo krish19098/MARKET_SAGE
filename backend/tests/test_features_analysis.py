@@ -88,3 +88,19 @@ def test_analyst_report_has_separated_evidence(mds):
     assert any(e.category == "fundamentals" and e.kind == "unknown" for e in rep.evidence)
     assert rep.structure["trend"] in {"uptrend", "downtrend", "range", "undetermined"}
     assert rep.regime["regime_trend"] in {"bull", "bear", "sideways", "unknown"}
+
+
+def test_failed_breakout_measured_against_broken_level():
+    from market_sage.models.setups import detect_setups
+
+    n = 80
+    close = np.full(n, 100.0)
+    close[-3] = 106.0  # breakout above prior high ~101
+    close[-2] = 105.0
+    close[-1] = 103.0  # pulled back but still well above the broken level 101 → not invalidated
+    f = pd.DataFrame({"close": close, "high": close + 1, "low": close - 1, "open": close, "atr14": 2.0,
+                      "vol_ratio20": 1.0, "vol_contraction": 1.0, "rs_index20": 0.0, "macd_hist_n": 0.0,
+                      "ret_1": 0.0, "hammer": 0, "bullish_engulfing": 0})
+    assert not any(s.stage == "invalidated" for s in detect_setups(f))
+    f.loc[n - 1, ["close", "high", "low", "open"]] = [99.0, 100.0, 98.0, 99.0]  # back below 101 - 0.5
+    assert any(s.name == "breakout" and s.stage == "invalidated" for s in detect_setups(f))

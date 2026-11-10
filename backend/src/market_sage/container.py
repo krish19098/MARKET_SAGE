@@ -91,7 +91,7 @@ def recommendation_from_ledger(p: dict) -> Recommendation:
     plan = None
     if p.get("stop") is not None:
         plan = TradePlan(p["entry_low"], p["entry_high"], p["stop"], p["target1"], p["target2"], p["horizon_sessions"],
-                         tuple(plan_d.get("horizon_range", [3, 10])), plan_d.get("reward_risk_t1", 0.0),  # type: ignore[arg-type]
+                         tuple(plan_d.get("horizon_range", [3, 10])), plan_d.get("reward_risk_t1", 0.0),
                          plan_d.get("per_share_risk", p["price_at_prediction"] - p["stop"]),
                          plan_d.get("entry_rule", ""), plan_d.get("partial_booking", ""), plan_d.get("gap_risk_note", ""))
     ev = (p.get("uncertainty") or {}).get("expected_value_per_share")

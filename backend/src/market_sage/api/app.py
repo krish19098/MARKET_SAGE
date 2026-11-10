@@ -94,7 +94,7 @@ def create_app(container: Container | None = None, settings: Settings | None = N
     settings = settings or get_settings()
 
     @asynccontextmanager
-    async def lifespan(app: FastAPI):  # type: ignore[no-untyped-def]
+    async def lifespan(app: FastAPI):
         app.state.c = container or Container.build(settings)
         yield
 
