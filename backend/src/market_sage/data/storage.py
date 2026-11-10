@@ -38,9 +38,7 @@ class RawStore:
         sha = hashlib.sha256(content).hexdigest()
         with self.engine.begin() as conn:
             existing = conn.execute(
-                select(s.raw_files.c.id).where(
-                    and_(s.raw_files.c.sha256 == sha, s.raw_files.c.dataset == dataset)
-                )
+                select(s.raw_files.c.id).where(and_(s.raw_files.c.sha256 == sha, s.raw_files.c.dataset == dataset))
             ).scalar()
             if existing is not None:
                 return int(existing)
@@ -93,8 +91,13 @@ class BarStore:
         if existing.empty:
             merged, conflicts, inserted = bars, bars.iloc[0:0], len(bars)
         else:
-            joined = bars.merge(existing[["ts", "open", "high", "low", "close", "volume"]], on="ts",
-                                how="left", suffixes=("", "_old"), indicator=True)
+            joined = bars.merge(
+                existing[["ts", "open", "high", "low", "close", "volume"]],
+                on="ts",
+                how="left",
+                suffixes=("", "_old"),
+                indicator=True,
+            )
             dup = joined["_merge"] == "both"
             differs = dup & (
                 (joined["close"] - joined["close_old"]).abs().gt(1e-9)
@@ -154,36 +157,64 @@ class InstrumentRegistry:
                         .where(and_(sh.c.instrument_id == iid, sh.c.valid_to.is_(None)))
                         .values(valid_to=as_of or utcnow().astimezone(IST).date())
                     )
-                    conn.execute(insert(sh).values(instrument_id=iid, exchange=exchange, symbol=symbol,
-                                                   valid_from=as_of or utcnow().astimezone(IST).date()))
+                    conn.execute(
+                        insert(sh).values(
+                            instrument_id=iid,
+                            exchange=exchange,
+                            symbol=symbol,
+                            valid_from=as_of or utcnow().astimezone(IST).date(),
+                        )
+                    )
                 return iid
             res = conn.execute(
-                insert(t).values(exchange=exchange, symbol=symbol, isin=isin, name=name, series=series,
-                                 sector=sector, is_index=is_index, created_at=utcnow())
+                insert(t).values(
+                    exchange=exchange,
+                    symbol=symbol,
+                    isin=isin,
+                    name=name,
+                    series=series,
+                    sector=sector,
+                    is_index=is_index,
+                    created_at=utcnow(),
+                )
             )
             iid = int(res.inserted_primary_key[0])  # type: ignore[index]
-            conn.execute(insert(s.symbol_history).values(instrument_id=iid, exchange=exchange, symbol=symbol,
-                                                         valid_from=as_of or date(1990, 1, 1)))
+            conn.execute(
+                insert(s.symbol_history).values(
+                    instrument_id=iid, exchange=exchange, symbol=symbol, valid_from=as_of or date(1990, 1, 1)
+                )
+            )
             return iid
 
     def map_provider(self, inst: ProviderInstrument, instrument_id: int, valid_from: date) -> None:
         m = s.provider_instrument_map
         with self.engine.begin() as conn:
             exists = conn.execute(
-                select(m.c.id).where(and_(m.c.provider == inst.provider, m.c.provider_token == inst.provider_token,
-                                          m.c.valid_to.is_(None)))
+                select(m.c.id).where(
+                    and_(
+                        m.c.provider == inst.provider, m.c.provider_token == inst.provider_token, m.c.valid_to.is_(None)
+                    )
+                )
             ).first()
             if exists is None:
-                conn.execute(insert(m).values(provider=inst.provider, provider_token=inst.provider_token,
-                                              exchange=inst.exchange, symbol=inst.symbol,
-                                              instrument_id=instrument_id, valid_from=valid_from))
+                conn.execute(
+                    insert(m).values(
+                        provider=inst.provider,
+                        provider_token=inst.provider_token,
+                        exchange=inst.exchange,
+                        symbol=inst.symbol,
+                        instrument_id=instrument_id,
+                        valid_from=valid_from,
+                    )
+                )
 
     def provider_token(self, provider: str, instrument_id: int) -> str | None:
         m = s.provider_instrument_map
         with self.engine.connect() as conn:
             return conn.execute(
-                select(m.c.provider_token).where(and_(m.c.provider == provider, m.c.instrument_id == instrument_id,
-                                                      m.c.valid_to.is_(None)))
+                select(m.c.provider_token).where(
+                    and_(m.c.provider == provider, m.c.instrument_id == instrument_id, m.c.valid_to.is_(None))
+                )
             ).scalar()
 
     def by_symbol(self, exchange: str, symbol: str) -> dict | None:

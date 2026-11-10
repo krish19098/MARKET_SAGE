@@ -1,0 +1,21 @@
+{
+  "version": "india-equity-2026-v1",
+  "verified": false,
+  "verification_note": "UNVERIFIED defaults from general research. Reconcile against an Angel One contract note and current NSE/SEBI circulars before relying on cost figures.",
+  "effective_from": "2026-01-01",
+  "delivery": {
+    "brokerage_pct": 0.001, "brokerage_cap": 20.0, "brokerage_min": 0.0,
+    "stt_buy_pct": 0.001, "stt_sell_pct": 0.001,
+    "exchange_txn_pct": 0.0000297, "sebi_fee_pct": 0.000001,
+    "stamp_buy_pct": 0.00015, "gst_pct": 0.18,
+    "dp_charge_per_sell": 20.0
+  },
+  "intraday": {
+    "brokerage_pct": 0.001, "brokerage_cap": 20.0, "brokerage_min": 0.0,
+    "stt_buy_pct": 0.0, "stt_sell_pct": 0.00025,
+    "exchange_txn_pct": 0.0000297, "sebi_fee_pct": 0.000001,
+    "stamp_buy_pct": 0.00003, "gst_pct": 0.18,
+    "dp_charge_per_sell": 0.0
+  },
+  "slippage_pct": 0.0010
+}

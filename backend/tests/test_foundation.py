@@ -57,7 +57,8 @@ def test_ledger_tables_are_append_only(engine):
 
 
 ORDER_PATTERNS = re.compile(
-    r"place" r"Order|modify" r"Order|cancel" r"Order|/order/v1|gtt-" r"service|create" r"Rule", re.I)
+    r"place" r"Order|modify" r"Order|cancel" r"Order|/order/v1|gtt-" r"service|create" r"Rule", re.I
+)
 
 
 def _source_files():
@@ -73,7 +74,8 @@ def test_no_order_execution_endpoints_in_codebase():
 
 SECRET_PATTERNS = re.compile(
     r"(-----BEGIN [A-Z ]*PRIVATE KEY-----|AKIA[0-9A-Z]{16}|eyJhbGciOi[A-Za-z0-9_\-]{20,}\.[A-Za-z0-9_\-]{20,}"
-    r"|(?i:api[_-]?key|secret|password|totp)\s*[:=]\s*['\"][A-Za-z0-9/+_\-]{16,}['\"])")
+    r"|(?i:api[_-]?key|secret|password|totp)\s*[:=]\s*['\"][A-Za-z0-9/+_\-]{16,}['\"])"
+)
 
 
 def test_no_secrets_committed():

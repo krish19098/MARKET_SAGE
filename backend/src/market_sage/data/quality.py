@@ -54,6 +54,9 @@ def check_daily_bars(
     known = known_action_dates or set()
     for d, r in zip(df["session_date"], rets, strict=True):
         if pd.notna(r) and abs(r) > extreme_move and d not in known:
-            issues.append(QualityIssue("extreme_move", "warn", d,
-                                       f"close-to-close move {r:+.1%} without a recorded corporate action"))
+            issues.append(
+                QualityIssue(
+                    "extreme_move", "warn", d, f"close-to-close move {r:+.1%} without a recorded corporate action"
+                )
+            )
     return issues

@@ -49,9 +49,7 @@ class Settings(BaseSettings):
     @classmethod
     def _paper_only(cls, v: str) -> str:
         if v != "paper":
-            raise ValueError(
-                "MARKET SAGE supports paper trading only; real-money execution is disabled by design."
-            )
+            raise ValueError("MARKET SAGE supports paper trading only; real-money execution is disabled by design.")
         return v
 
 

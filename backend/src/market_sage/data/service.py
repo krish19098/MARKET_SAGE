@@ -58,49 +58,87 @@ class MarketDataService:
 
     def _record_calendar_day(self, d: date, status: str, source: str) -> None:
         with self.engine.begin() as conn:
-            exists = conn.execute(select(s.calendar_days.c.trade_date).where(
-                and_(s.calendar_days.c.trade_date == d, s.calendar_days.c.exchange == "NSE"))).first()
+            exists = conn.execute(
+                select(s.calendar_days.c.trade_date).where(
+                    and_(s.calendar_days.c.trade_date == d, s.calendar_days.c.exchange == "NSE")
+                )
+            ).first()
             if exists is None:
-                conn.execute(insert(s.calendar_days).values(trade_date=d, exchange="NSE", status=status,
-                                                            source=source))
+                conn.execute(insert(s.calendar_days).values(trade_date=d, exchange="NSE", status=status, source=source))
         if status == "holiday":
             self.calendar.add_inferred_holiday(d, source)
 
     # --- run bookkeeping ---------------------------------------------------------------------
     def _start_run(self, provider: str, dataset: str) -> int:
         with self.engine.begin() as conn:
-            res = conn.execute(insert(s.ingestion_runs).values(provider=provider, dataset=dataset,
-                                                                started_at=utcnow(), status="running"))
+            res = conn.execute(
+                insert(s.ingestion_runs).values(
+                    provider=provider, dataset=dataset, started_at=utcnow(), status="running"
+                )
+            )
             return int(res.inserted_primary_key[0])  # type: ignore[index]
 
     def _finish_run(self, rep: IngestReport) -> None:
         with self.engine.begin() as conn:
-            conn.execute(s.ingestion_runs.update().where(s.ingestion_runs.c.id == rep.run_id).values(
-                finished_at=utcnow(), status=rep.status, rows=rep.rows, message=rep.message[:2000]))
+            conn.execute(
+                s.ingestion_runs.update()
+                .where(s.ingestion_runs.c.id == rep.run_id)
+                .values(finished_at=utcnow(), status=rep.status, rows=rep.rows, message=rep.message[:2000])
+            )
 
     def _record_issues(self, run_id: int, instrument_id: int, issues: list) -> int:
         if not issues:
             return 0
         now = utcnow()
         with self.engine.begin() as conn:
-            conn.execute(insert(s.data_quality_issues), [
-                {"run_id": run_id, "instrument_id": instrument_id, "dataset": "bars_1d", "trade_date": i.trade_date,
-                 "check": i.check, "severity": i.severity, "detail": i.detail, "detected_at": now}
-                for i in issues])
+            conn.execute(
+                insert(s.data_quality_issues),
+                [
+                    {
+                        "run_id": run_id,
+                        "instrument_id": instrument_id,
+                        "dataset": "bars_1d",
+                        "trade_date": i.trade_date,
+                        "check": i.check,
+                        "severity": i.severity,
+                        "detail": i.detail,
+                        "detected_at": now,
+                    }
+                    for i in issues
+                ],
+            )
         return len(issues)
 
     # --- corporate actions -------------------------------------------------------------------
-    def add_corporate_action(self, instrument_id: int, ca: CorporateAction, raw_file_id: int | None = None,
-                             published_at: datetime | None = None) -> None:
+    def add_corporate_action(
+        self,
+        instrument_id: int,
+        ca: CorporateAction,
+        raw_file_id: int | None = None,
+        published_at: datetime | None = None,
+    ) -> None:
         t = s.corporate_actions
         with self.engine.begin() as conn:
-            exists = conn.execute(select(t.c.id).where(and_(t.c.instrument_id == instrument_id,
-                                                            t.c.ex_date == ca.ex_date, t.c.kind == ca.kind))).first()
+            exists = conn.execute(
+                select(t.c.id).where(
+                    and_(t.c.instrument_id == instrument_id, t.c.ex_date == ca.ex_date, t.c.kind == ca.kind)
+                )
+            ).first()
             if exists is None:
-                conn.execute(insert(t).values(instrument_id=instrument_id, ex_date=ca.ex_date, kind=ca.kind,
-                                              ratio_num=ca.ratio_num, ratio_den=ca.ratio_den,
-                                              cash_amount=ca.cash_amount, purpose=ca.purpose, source=ca.source,
-                                              published_at=published_at, raw_file_id=raw_file_id))
+                conn.execute(
+                    insert(t).values(
+                        instrument_id=instrument_id,
+                        ex_date=ca.ex_date,
+                        kind=ca.kind,
+                        ratio_num=ca.ratio_num,
+                        ratio_den=ca.ratio_den,
+                        cash_amount=ca.cash_amount,
+                        purpose=ca.purpose,
+                        source=ca.source,
+                        published_at=published_at,
+                        raw_file_id=raw_file_id,
+                    )
+                )
 
     def corporate_actions(self, instrument_id: int, known_by: datetime | None = None) -> list[CorporateAction]:
         """Corporate actions; with ``known_by``, only those published by then (PIT), when known."""
@@ -112,25 +150,40 @@ class MarketDataService:
         for r in rows:
             if known_by is not None and r.published_at is not None and r.published_at > known_by:
                 continue
-            out.append(CorporateAction(instrument_id, r.ex_date, r.kind, r.ratio_num, r.ratio_den, r.cash_amount,
-                                       r.purpose or "", r.source))
+            out.append(
+                CorporateAction(
+                    instrument_id, r.ex_date, r.kind, r.ratio_num, r.ratio_den, r.cash_amount, r.purpose or "", r.source
+                )
+            )
         return out
 
     # --- ingestion: synthetic fixture -----------------------------------------------------------
     def ingest_fixture(self, market: SyntheticMarket) -> IngestReport:
         run = self._start_run("fixture", "eod_bars")
         rep = IngestReport("fixture", "eod_bars", run)
-        raw_id = self.raw.save("fixture", "synthetic_market", f"fixture://seed={market.seed}",
-                               json.dumps({"seed": market.seed, "start": str(market.start), "end": str(market.end),
-                                           "stocks": len(market.stocks)}).encode(),
-                               "synthetic_market.json", is_synthetic=True,
-                               licence_note="SYNTHETIC — not market data")
+        raw_id = self.raw.save(
+            "fixture",
+            "synthetic_market",
+            f"fixture://seed={market.seed}",
+            json.dumps(
+                {"seed": market.seed, "start": str(market.start), "end": str(market.end), "stocks": len(market.stocks)}
+            ).encode(),
+            "synthetic_market.json",
+            is_synthetic=True,
+            licence_note="SYNTHETIC — not market data",
+        )
         start = ist_datetime(market.start, time(0, 0))
         end = ist_datetime(market.end + timedelta(days=1), time(0, 0))
         for inst in market.list_instruments():
-            iid = self.instruments.get_or_create(inst.exchange, inst.symbol, isin=inst.isin, name=inst.name,
-                                                 series=inst.series, sector=market.sector_of(inst.symbol),
-                                                 is_index=inst.instrument_type == "INDEX")
+            iid = self.instruments.get_or_create(
+                inst.exchange,
+                inst.symbol,
+                isin=inst.isin,
+                name=inst.name,
+                series=inst.series,
+                sector=market.sector_of(inst.symbol),
+                is_index=inst.instrument_type == "INDEX",
+            )
             self.instruments.map_provider(inst, iid, market.start)
             bars = market.fetch_bars(inst, Interval.D1, start, end)
             bars["raw_file_id"] = raw_id
@@ -143,16 +196,18 @@ class MarketDataService:
         for inst in market.list_instruments():
             iid = self.instruments.get_or_create(inst.exchange, inst.symbol)
             known = {c.ex_date for c in self.corporate_actions(iid)}
-            rep.issues += self._record_issues(run, iid, check_daily_bars(
-                self.bars.read(inst.exchange, Interval.D1, iid), self.calendar, known))
+            rep.issues += self._record_issues(
+                run, iid, check_daily_bars(self.bars.read(inst.exchange, Interval.D1, iid), self.calendar, known)
+            )
         rep.sessions = len(market.calendar.trading_days(market.start, market.end))
         rep.message = "SYNTHETIC fixture data ingested (not market data)"
         self._finish_run(rep)
         return rep
 
     # --- ingestion: NSE official archives ---------------------------------------------------
-    def ingest_nse_eod(self, start: date, end: date, client: nse_archive.NseArchiveClient | None = None
-                       ) -> IngestReport:
+    def ingest_nse_eod(
+        self, start: date, end: date, client: nse_archive.NseArchiveClient | None = None
+    ) -> IngestReport:
         """Ingest NSE full bhavcopy (OHLCV + delivery) for each weekday; a 404 on a weekday is recorded
         as an inferred holiday (history only)."""
         client = client or nse_archive.NseArchiveClient()
@@ -170,9 +225,14 @@ class MarketDataService:
                         if d < utcnow().date():
                             self._record_calendar_day(d, "holiday", "inferred: no NSE bhavcopy (404)")
                     else:
-                        raw_id = self.raw.save(nse_archive.PROVIDER, "sec_bhavdata_full", url, content,
-                                               f"sec_bhavdata_full_{d:%d%m%Y}.csv",
-                                               licence_note=nse_archive.LICENCE_NOTE)
+                        raw_id = self.raw.save(
+                            nse_archive.PROVIDER,
+                            "sec_bhavdata_full",
+                            url,
+                            content,
+                            f"sec_bhavdata_full_{d:%d%m%Y}.csv",
+                            licence_note=nse_archive.LICENCE_NOTE,
+                        )
                         frame = nse_archive.parse_full_bhavcopy(content, utcnow(), raw_id)
                         touched |= self._store_eod_frame(frame)
                         rep.rows += len(frame)
@@ -185,8 +245,9 @@ class MarketDataService:
             raise
         for iid in touched:
             known = {c.ex_date for c in self.corporate_actions(iid)}
-            rep.issues += self._record_issues(run, iid, check_daily_bars(
-                self.bars.read("NSE", Interval.D1, iid), self.calendar, known))
+            rep.issues += self._record_issues(
+                run, iid, check_daily_bars(self.bars.read("NSE", Interval.D1, iid), self.calendar, known)
+            )
         rep.instruments = len(touched)
         self._finish_run(rep)
         return rep
@@ -195,15 +256,17 @@ class MarketDataService:
         touched = set()
         for sym, g in frame.groupby("symbol"):
             first = g.iloc[0]
-            iid = self.instruments.get_or_create("NSE", str(sym), isin=first.get("isin") or None,
-                                                 name=first.get("name"), series=first.get("series"))
+            iid = self.instruments.get_or_create(
+                "NSE", str(sym), isin=first.get("isin") or None, name=first.get("name"), series=first.get("series")
+            )
             self.bars.upsert("NSE", Interval.D1, iid, g[BAR_COLUMNS])
             touched.add(iid)
         return touched
 
     # --- serving ------------------------------------------------------------------------------
-    def daily_bars(self, instrument_id: int, *, until: date | None = None, adjusted: bool = True,
-                   known_by: datetime | None = None) -> pd.DataFrame:
+    def daily_bars(
+        self, instrument_id: int, *, until: date | None = None, adjusted: bool = True, known_by: datetime | None = None
+    ) -> pd.DataFrame:
         """Daily bars up to and including session ``until``. Adjusted with corporate actions whose
         ex-date is on/before ``until`` (an action after the cutoff cannot be known at the cutoff)."""
         inst = self.instruments.get(instrument_id)
@@ -214,8 +277,9 @@ class MarketDataService:
             df = df[df["session_date"] <= until]
         df = df.sort_values("ts").reset_index(drop=True)
         if adjusted:
-            actions = [a for a in self.corporate_actions(instrument_id, known_by)
-                       if until is None or a.ex_date <= until]
+            actions = [
+                a for a in self.corporate_actions(instrument_id, known_by) if until is None or a.ex_date <= until
+            ]
             df = adjust_bars(df, actions)
         return df
 

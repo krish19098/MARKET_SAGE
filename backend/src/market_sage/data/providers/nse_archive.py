@@ -55,8 +55,7 @@ def equity_list_url() -> str:
 
 
 def corporate_actions_url(start: date, end: date) -> str:
-    return (f"{WWW}/api/corporates-corporateActions?index=equities"
-            f"&from_date={start:%d-%m-%Y}&to_date={end:%d-%m-%Y}")
+    return f"{WWW}/api/corporates-corporateActions?index=equities&from_date={start:%d-%m-%Y}&to_date={end:%d-%m-%Y}"
 
 
 def _daily_ts(d: date) -> tuple[datetime, datetime]:
@@ -71,16 +70,23 @@ def parse_udiff_bhavcopy(content: bytes, received_ts: datetime, raw_file_id: int
     df = pd.read_csv(io.BytesIO(content), dtype=str).rename(columns=lambda c: c.strip())
     df = df[df["SctySrs"].str.strip().isin(EQUITY_SERIES)]
     sess = pd.to_datetime(df["TradDt"].str.strip()).dt.date
-    out = pd.DataFrame({
-        "symbol": df["TckrSymb"].str.strip(), "isin": df["ISIN"].str.strip(), "series": df["SctySrs"].str.strip(),
-        "name": df.get("FinInstrmNm", df["TckrSymb"]).str.strip(),
-        "session_date": sess,
-        "open": df["OpnPric"].astype(float), "high": df["HghPric"].astype(float),
-        "low": df["LwPric"].astype(float), "close": df["ClsPric"].astype(float),
-        "volume": df["TtlTradgVol"].astype(float), "turnover": df["TtlTrfVal"].astype(float),
-        "trades": pd.to_numeric(df.get("TtlNbOfTxsExctd"), errors="coerce"),
-        "prev_close": pd.to_numeric(df.get("PrvsClsgPric"), errors="coerce"),
-    })
+    out = pd.DataFrame(
+        {
+            "symbol": df["TckrSymb"].str.strip(),
+            "isin": df["ISIN"].str.strip(),
+            "series": df["SctySrs"].str.strip(),
+            "name": df.get("FinInstrmNm", df["TckrSymb"]).str.strip(),
+            "session_date": sess,
+            "open": df["OpnPric"].astype(float),
+            "high": df["HghPric"].astype(float),
+            "low": df["LwPric"].astype(float),
+            "close": df["ClsPric"].astype(float),
+            "volume": df["TtlTradgVol"].astype(float),
+            "turnover": df["TtlTrfVal"].astype(float),
+            "trades": pd.to_numeric(df.get("TtlNbOfTxsExctd"), errors="coerce"),
+            "prev_close": pd.to_numeric(df.get("PrvsClsgPric"), errors="coerce"),
+        }
+    )
     return _finish(out, received_ts, raw_file_id)
 
 
@@ -90,14 +96,24 @@ def parse_full_bhavcopy(content: bytes, received_ts: datetime, raw_file_id: int 
     df = df.rename(columns=lambda c: c.strip()).apply(lambda c: c.str.strip())
     df = df[df["SERIES"].isin(EQUITY_SERIES)]
     num = lambda c: pd.to_numeric(df[c].replace({"-": None, "": None}), errors="coerce")  # noqa: E731
-    out = pd.DataFrame({
-        "symbol": df["SYMBOL"], "isin": None, "series": df["SERIES"], "name": df["SYMBOL"],
-        "session_date": pd.to_datetime(df["DATE1"], format="%d-%b-%Y").dt.date,
-        "open": num("OPEN_PRICE"), "high": num("HIGH_PRICE"), "low": num("LOW_PRICE"),
-        "close": num("CLOSE_PRICE"), "volume": num("TTL_TRD_QNTY"),
-        "turnover": num("TURNOVER_LACS") * 1e5, "trades": num("NO_OF_TRADES"),
-        "delivery_qty": num("DELIV_QTY"), "prev_close": num("PREV_CLOSE"),
-    })
+    out = pd.DataFrame(
+        {
+            "symbol": df["SYMBOL"],
+            "isin": None,
+            "series": df["SERIES"],
+            "name": df["SYMBOL"],
+            "session_date": pd.to_datetime(df["DATE1"], format="%d-%b-%Y").dt.date,
+            "open": num("OPEN_PRICE"),
+            "high": num("HIGH_PRICE"),
+            "low": num("LOW_PRICE"),
+            "close": num("CLOSE_PRICE"),
+            "volume": num("TTL_TRD_QNTY"),
+            "turnover": num("TURNOVER_LACS") * 1e5,
+            "trades": num("NO_OF_TRADES"),
+            "delivery_qty": num("DELIV_QTY"),
+            "prev_close": num("PREV_CLOSE"),
+        }
+    )
     return _finish(out, received_ts, raw_file_id)
 
 
@@ -115,11 +131,15 @@ def _finish(out: pd.DataFrame, received_ts: datetime, raw_file_id: int | None) -
 
 def parse_equity_list(content: bytes) -> pd.DataFrame:
     df = pd.read_csv(io.BytesIO(content), dtype=str).rename(columns=lambda c: c.strip())
-    return pd.DataFrame({
-        "symbol": df["SYMBOL"].str.strip(), "name": df["NAME OF COMPANY"].str.strip(),
-        "series": df["SERIES"].str.strip(), "isin": df["ISIN NUMBER"].str.strip(),
-        "listed_on": pd.to_datetime(df["DATE OF LISTING"].str.strip(), format="%d-%b-%Y", errors="coerce").dt.date,
-    })
+    return pd.DataFrame(
+        {
+            "symbol": df["SYMBOL"].str.strip(),
+            "name": df["NAME OF COMPANY"].str.strip(),
+            "series": df["SERIES"].str.strip(),
+            "isin": df["ISIN NUMBER"].str.strip(),
+            "listed_on": pd.to_datetime(df["DATE OF LISTING"].str.strip(), format="%d-%b-%Y", errors="coerce").dt.date,
+        }
+    )
 
 
 _SPLIT = re.compile(r"(?:split|sub-?division).*?(?:rs\.?|re\.?)\s*([\d.]+).*?(?:rs\.?|re\.?)\s*([\d.]+)", re.I)
@@ -149,8 +169,12 @@ def parse_corporate_actions(records: list[dict[str, Any]]) -> list[tuple[str, Co
             ex = datetime.strptime(str(r.get("exDate", "")).strip(), "%d-%b-%Y").replace(tzinfo=IST).date()
         except ValueError:
             continue
-        out.append((str(r.get("symbol", "")).strip(),
-                    CorporateAction(0, ex, kind, num, den, cash, purpose=subject, source=PROVIDER)))
+        out.append(
+            (
+                str(r.get("symbol", "")).strip(),
+                CorporateAction(0, ex, kind, num, den, cash, purpose=subject, source=PROVIDER),
+            )
+        )
     return out
 
 
@@ -159,10 +183,15 @@ class NseArchiveClient:
 
     def __init__(self, timeout: float = 30.0, max_retries: int = 4) -> None:
         self.max_retries = max_retries
-        self._http = httpx.Client(timeout=timeout, follow_redirects=True, headers={
-            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) MarketSage/0.1 (personal research)",
-            "Accept": "*/*", "Accept-Language": "en-US,en;q=0.9",
-        })
+        self._http = httpx.Client(
+            timeout=timeout,
+            follow_redirects=True,
+            headers={
+                "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) MarketSage/0.1 (personal research)",
+                "Accept": "*/*",
+                "Accept-Language": "en-US,en;q=0.9",
+            },
+        )
         self._last = 0.0
         self._cookies_ready = False
 
@@ -200,7 +229,16 @@ class NseArchiveClient:
 
 
 __all__ = [
-    "BAR_COLUMNS", "CAPABILITIES", "LICENCE_NOTE", "NseArchiveClient", "corporate_actions_url",
-    "equity_list_url", "full_bhavcopy_url", "parse_corporate_actions", "parse_equity_list",
-    "parse_full_bhavcopy", "parse_udiff_bhavcopy", "udiff_bhavcopy_url",
+    "BAR_COLUMNS",
+    "CAPABILITIES",
+    "LICENCE_NOTE",
+    "NseArchiveClient",
+    "corporate_actions_url",
+    "equity_list_url",
+    "full_bhavcopy_url",
+    "parse_corporate_actions",
+    "parse_equity_list",
+    "parse_full_bhavcopy",
+    "parse_udiff_bhavcopy",
+    "udiff_bhavcopy_url",
 ]

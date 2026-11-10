@@ -19,8 +19,7 @@ FIX = Path(__file__).parent / "fixtures"
 
 
 def test_parse_full_bhavcopy_with_delivery():
-    df = nse_archive.parse_full_bhavcopy((FIX / "sample_sec_bhavdata_full.csv").read_bytes(),
-                                         datetime.now(UTC), 1)
+    df = nse_archive.parse_full_bhavcopy((FIX / "sample_sec_bhavdata_full.csv").read_bytes(), datetime.now(UTC), 1)
     assert list(df["symbol"]) == ["SAMPLEA", "SAMPLEB"]  # non-equity series dropped
     a = df.iloc[0]
     assert a["close"] == 104.0 and a["delivery_qty"] == 70000 and a["turnover"] == pytest.approx(153.45e5)
@@ -34,21 +33,32 @@ def test_parse_udiff_bhavcopy():
     assert df.iloc[1]["isin"] == "INE000B01012" and df.iloc[1]["high"] == 2520.0
 
 
-@pytest.mark.parametrize("subject,expected", [
-    ("Face Value Split (Sub-Division) - From Rs 10/- Per Share To Rs 2/- Per Share", ("split", 5.0, 1.0, None)),
-    ("Bonus 1:1", ("bonus", 1.0, 1.0, None)),
-    ("Interim Dividend - Rs 5.50 Per Share", ("dividend", None, None, 5.5)),
-    ("Annual General Meeting", ("other", None, None, None)),
-])
+@pytest.mark.parametrize(
+    "subject,expected",
+    [
+        ("Face Value Split (Sub-Division) - From Rs 10/- Per Share To Rs 2/- Per Share", ("split", 5.0, 1.0, None)),
+        ("Bonus 1:1", ("bonus", 1.0, 1.0, None)),
+        ("Interim Dividend - Rs 5.50 Per Share", ("dividend", None, None, 5.5)),
+        ("Annual General Meeting", ("other", None, None, None)),
+    ],
+)
 def test_corporate_action_subject_parsing(subject, expected):
     assert nse_archive.parse_ca_subject(subject) == expected
 
 
 def test_adjustment_split_and_bonus():
     sessions = [date(2026, 1, d) for d in (5, 6, 7, 8)]
-    bars = pd.DataFrame({"session_date": sessions, "open": [100.0, 100, 20, 20], "high": [100.0, 100, 20, 20],
-                         "low": [100.0, 100, 20, 20], "close": [100.0, 100, 20, 20],
-                         "volume": [10.0, 10, 50, 50], "delivery_qty": [5.0, 5, 25, 25]})
+    bars = pd.DataFrame(
+        {
+            "session_date": sessions,
+            "open": [100.0, 100, 20, 20],
+            "high": [100.0, 100, 20, 20],
+            "low": [100.0, 100, 20, 20],
+            "close": [100.0, 100, 20, 20],
+            "volume": [10.0, 10, 50, 50],
+            "delivery_qty": [5.0, 5, 25, 25],
+        }
+    )
     adj = adjust_bars(bars, [CorporateAction(1, date(2026, 1, 7), "split", 5, 1)])
     assert list(adj["close"]) == [20, 20, 20, 20] and list(adj["volume"]) == [50, 50, 50, 50]
     adj2 = adjust_bars(bars, [CorporateAction(1, date(2026, 1, 7), "bonus", 1, 1)])
@@ -57,11 +67,26 @@ def test_adjustment_split_and_bonus():
 
 def test_quality_checks_flag_problems(calendar):
     d = [date(2026, 1, 5), date(2026, 1, 6), date(2026, 1, 6), date(2026, 1, 9)]
-    bars = pd.DataFrame({"ts": range(4), "session_date": d, "open": [10.0, 10, 10, 10], "high": [11.0, 9, 11, 15],
-                         "low": [9.0, 9, 9, 9], "close": [10.0, 10, 10, 14], "volume": [100.0, 0, 100, -1]})
+    bars = pd.DataFrame(
+        {
+            "ts": range(4),
+            "session_date": d,
+            "open": [10.0, 10, 10, 10],
+            "high": [11.0, 9, 11, 15],
+            "low": [9.0, 9, 9, 9],
+            "close": [10.0, 10, 10, 14],
+            "volume": [100.0, 0, 100, -1],
+        }
+    )
     checks = {i.check for i in check_daily_bars(bars, calendar)}
-    assert {"duplicate", "ohlc_inconsistent", "zero_volume", "negative_volume", "missing_session",
-            "extreme_move"} <= checks
+    assert {
+        "duplicate",
+        "ohlc_inconsistent",
+        "zero_volume",
+        "negative_volume",
+        "missing_session",
+        "extreme_move",
+    } <= checks
 
 
 def test_chunk_planner_respects_window():
@@ -74,8 +99,11 @@ def test_chunk_planner_respects_window():
 def test_rate_limiter_waits():
     t = [0.0]
     slept = []
-    rl = RateLimiter(RateLimit(per_second=2, per_minute=3), clock=lambda: t[0],
-                     sleep=lambda x: (slept.append(x), t.__setitem__(0, t[0] + x)))
+    rl = RateLimiter(
+        RateLimit(per_second=2, per_minute=3),
+        clock=lambda: t[0],
+        sleep=lambda x: (slept.append(x), t.__setitem__(0, t[0] + x)),
+    )
     for _ in range(4):
         rl.acquire()
     assert slept and sum(slept) >= 59  # 4th call must wait for the per-minute window
@@ -83,24 +111,33 @@ def test_rate_limiter_waits():
 
 def test_angel_scrip_master_and_candles_and_ws_packet():
     recs = [
-        {"token": "2885", "symbol": "RELIANCE-EQ", "name": "RELIANCE", "exch_seg": "NSE", "instrumenttype": "",
-         "lotsize": "1", "tick_size": "10.000000"},
+        {
+            "token": "2885",
+            "symbol": "RELIANCE-EQ",
+            "name": "RELIANCE",
+            "exch_seg": "NSE",
+            "instrumenttype": "",
+            "lotsize": "1",
+            "tick_size": "10.000000",
+        },
         {"token": "99999", "symbol": "NIFTY24DECFUT", "name": "NIFTY", "exch_seg": "NFO", "instrumenttype": "FUTIDX"},
         {"token": "500325", "symbol": "RELIANCE", "name": "RELIANCE", "exch_seg": "BSE", "instrumenttype": ""},
     ]
     insts = angelone.parse_scrip_master(recs)
-    assert [(i.exchange, i.symbol, i.provider_token) for i in insts] == [("NSE", "RELIANCE", "2885"),
-                                                                       ("BSE", "RELIANCE", "500325")]
+    assert [(i.exchange, i.symbol, i.provider_token) for i in insts] == [
+        ("NSE", "RELIANCE", "2885"),
+        ("BSE", "RELIANCE", "500325"),
+    ]
     assert insts[0].tick_size == 0.1
-    df = angelone.parse_candles([["2026-11-03T09:15:00+05:30", 1, 2, 0.5, 1.5, 1000]], Interval.M5,
-                                datetime.now(UTC))
+    df = angelone.parse_candles([["2026-11-03T09:15:00+05:30", 1, 2, 0.5, 1.5, 1000]], Interval.M5, datetime.now(UTC))
     assert df.iloc[0]["session_date"] == date(2026, 11, 3)
     assert df.iloc[0]["source_ts"] == datetime(2026, 11, 3, 9, 20, tzinfo=IST)
     ms = int(datetime(2026, 11, 3, 10, 0, tzinfo=IST).timestamp() * 1000)
     q = angelone.parse_ws_packet(angelone.build_ws_packet("2885", ms, 123450), datetime.now(UTC))
     assert q and q.ltp == 1234.5 and q.provider_token == "2885"
-    pkt = angelone.build_ws_packet("2885", ms, 123450, mode=angelone.WS_MODE_QUOTE,
-                                   ohlc_paise=(120000, 125000, 119000, 121000), volume=777)
+    pkt = angelone.build_ws_packet(
+        "2885", ms, 123450, mode=angelone.WS_MODE_QUOTE, ohlc_paise=(120000, 125000, 119000, 121000), volume=777
+    )
     q2 = angelone.parse_ws_packet(pkt, datetime.now(UTC))
     assert q2.high == 1250.0 and q2.prev_close == 1210.0 and q2.volume == 777
 
@@ -120,6 +157,7 @@ def test_angel_session_relogs_after_midnight(monkeypatch):
 
                 def json(self):
                     return {"status": True, "data": {"jwtToken": "j", "refreshToken": "r", "feedToken": "f"}}
+
             return R()
 
     now = [datetime(2026, 11, 3, 8, 0, tzinfo=IST)]
@@ -142,8 +180,11 @@ def test_fixture_ingest_end_to_end(mds, market):
     assert raw["close"].iloc[i] / raw["close"].iloc[i - 1] < 0.4  # raw shows the split drop
     assert 0.8 < adj["close"].iloc[i] / adj["close"].iloc[i - 1] < 1.25  # adjusted removes it
     # adjustment is point-in-time: before the ex-date the action is not applied
-    pre = mds.daily_bars(inst["id"], until=market.split_ex_date.replace(day=1) if market.split_ex_date.day > 1
-                         else market.split_ex_date, adjusted=True)
+    pre = mds.daily_bars(
+        inst["id"],
+        until=market.split_ex_date.replace(day=1) if market.split_ex_date.day > 1 else market.split_ex_date,
+        adjusted=True,
+    )
     assert pre["adj_factor"].max() == 1.0
     with mds.engine.connect() as c:
         assert c.execute(select(s.raw_files.c.is_synthetic)).scalar() is True

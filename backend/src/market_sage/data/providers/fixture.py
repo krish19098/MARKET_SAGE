@@ -50,8 +50,9 @@ class SyntheticStock:
 class SyntheticMarket:
     capabilities = ProviderCapabilities(
         provider=PROVIDER,
-        roles=frozenset({DataRole.EOD_BARS, DataRole.DELIVERY, DataRole.CORPORATE_ACTIONS,
-                         DataRole.UNIVERSE, DataRole.LIVE_QUOTES}),
+        roles=frozenset(
+            {DataRole.EOD_BARS, DataRole.DELIVERY, DataRole.CORPORATE_ACTIONS, DataRole.UNIVERSE, DataRole.LIVE_QUOTES}
+        ),
         exchanges=frozenset({"NSE"}),
         intervals=frozenset({Interval.D1}),
         max_days_per_request={Interval.D1: 100000},
@@ -60,13 +61,29 @@ class SyntheticMarket:
         notes="SYNTHETIC fixture data for development/testing only.",
     )
 
-    def __init__(self, calendar: ExchangeCalendar, start: date, end: date, n_stocks: int = 30,
-                 seed: int = 7) -> None:
+    def __init__(
+        self,
+        calendar: ExchangeCalendar,
+        start: date,
+        end: date,
+        n_stocks: int = 30,
+        seed: int = 7,
+        planted_signal: float = 0.0,
+    ) -> None:
+        """``planted_signal`` > 0 adds a deliberately learnable momentum effect so the full pipeline
+        (model skill, promotion gate, BUY path) can be exercised. Any edge found on such data is an
+        artefact of the generator, never evidence about real markets."""
         self.calendar, self.start, self.end, self.seed = calendar, start, end, seed
+        self.planted_signal = planted_signal
         rng = np.random.default_rng(seed)
         self.stocks = [
-            SyntheticStock(f"SYN{i:03d}", SECTORS[i % len(SECTORS)], float(rng.uniform(80, 2500)),
-                           float(rng.uniform(0.6, 1.5)), float(rng.uniform(0.008, 0.022)))
+            SyntheticStock(
+                f"SYN{i:03d}",
+                SECTORS[i % len(SECTORS)],
+                float(rng.uniform(80, 2500)),
+                float(rng.uniform(0.6, 1.5)),
+                float(rng.uniform(0.008, 0.022)),
+            )
             for i in range(1, n_stocks + 1)
         ]
         self.split_symbol = self.stocks[2].symbol
@@ -93,7 +110,11 @@ class SyntheticMarket:
             eps = rng.normal(0, st.idio_vol, n)
             idio = np.zeros(n)
             for t in range(1, n):
-                idio[t] = 0.08 * idio[t - 1] + eps[t]
+                planted = 0.0
+                if self.planted_signal and t > 20:
+                    z = idio[t - 20 : t].sum() / (st.idio_vol * np.sqrt(20))
+                    planted = self.planted_signal * 0.0025 * np.tanh(z)
+                idio[t] = 0.08 * idio[t - 1] + eps[t] + planted
             r = st.beta * mkt + sector_ret[st.sector] + idio
             close = st.base_price * np.exp(np.cumsum(r))
             frames[st.symbol] = self._ohlcv(st.symbol, sessions, close, r, rng, received)
@@ -101,8 +122,9 @@ class SyntheticMarket:
         frames[INDEX_SYMBOL] = self._ohlcv(INDEX_SYMBOL, sessions, idx_close, mkt, rng, received, index=True)
         for sector in SECTORS:
             sec_close = 1000 * np.exp(np.cumsum(mkt + sector_ret[sector]))
-            frames[sector] = self._ohlcv(sector, sessions, sec_close, mkt + sector_ret[sector], rng,
-                                         received, index=True)
+            frames[sector] = self._ohlcv(
+                sector, sessions, sec_close, mkt + sector_ret[sector], rng, received, index=True
+            )
         if self.split_ex_date is not None:  # raw (unadjusted) prices drop 5x at the ex-date
             f = frames[self.split_symbol]
             post = f["session_date"] >= self.split_ex_date
@@ -112,8 +134,16 @@ class SyntheticMarket:
             f.loc[post, "delivery_qty"] = f.loc[post, "delivery_qty"] * 5
         return frames
 
-    def _ohlcv(self, symbol: str, sessions: list[date], close: np.ndarray, r: np.ndarray,
-               rng: np.random.Generator, received: datetime, index: bool = False) -> pd.DataFrame:
+    def _ohlcv(
+        self,
+        symbol: str,
+        sessions: list[date],
+        close: np.ndarray,
+        r: np.ndarray,
+        rng: np.random.Generator,
+        received: datetime,
+        index: bool = False,
+    ) -> pd.DataFrame:
         n = len(sessions)
         prev = np.concatenate([[close[0] / np.exp(r[0])], close[:-1]])
         gap = rng.normal(0, 0.003, n)
@@ -126,28 +156,52 @@ class SyntheticMarket:
         deliv = vol * np.clip(rng.normal(0.45, 0.1, n), 0.1, 0.9)
         ts = [ist_datetime(d, time(9, 15)) for d in sessions]
         src = [ist_datetime(d, time(15, 30)) for d in sessions]
-        return pd.DataFrame({
-            "ts": ts, "session_date": sessions, "open": open_, "high": high, "low": low, "close": close,
-            "volume": np.round(vol), "delivery_qty": np.round(deliv), "turnover": vol * close,
-            "trades": np.round(vol / 50), "source_ts": src, "received_ts": received,
-            "provider": PROVIDER, "raw_file_id": None,
-        })[BAR_COLUMNS]
+        return pd.DataFrame(
+            {
+                "ts": ts,
+                "session_date": sessions,
+                "open": open_,
+                "high": high,
+                "low": low,
+                "close": close,
+                "volume": np.round(vol),
+                "delivery_qty": np.round(deliv),
+                "turnover": vol * close,
+                "trades": np.round(vol / 50),
+                "source_ts": src,
+                "received_ts": received,
+                "provider": PROVIDER,
+                "raw_file_id": None,
+            }
+        )[BAR_COLUMNS]
 
     # --- provider protocols --------------------------------------------------------------------
     def list_instruments(self) -> Sequence[ProviderInstrument]:
-        out = [ProviderInstrument(PROVIDER, s.symbol, "NSE", s.symbol, name=f"Synthetic {s.symbol}",
-                                  isin=f"INSYN{s.symbol[3:]}0000"[:12], series="EQ", instrument_type="EQ")
-               for s in self.stocks]
+        out = [
+            ProviderInstrument(
+                PROVIDER,
+                s.symbol,
+                "NSE",
+                s.symbol,
+                name=f"Synthetic {s.symbol}",
+                isin=f"INSYN{s.symbol[3:]}0000"[:12],
+                series="EQ",
+                instrument_type="EQ",
+            )
+            for s in self.stocks
+        ]
         for sym in [INDEX_SYMBOL, *SECTORS]:
-            out.append(ProviderInstrument(PROVIDER, sym, "NSE", sym, name=f"Synthetic index {sym}",
-                                          instrument_type="INDEX"))
+            out.append(
+                ProviderInstrument(PROVIDER, sym, "NSE", sym, name=f"Synthetic index {sym}", instrument_type="INDEX")
+            )
         return out
 
     def sector_of(self, symbol: str) -> str | None:
         return next((s.sector for s in self.stocks if s.symbol == symbol), None)
 
-    def fetch_bars(self, instrument: ProviderInstrument, interval: Interval, start: datetime,
-                   end: datetime) -> pd.DataFrame:
+    def fetch_bars(
+        self, instrument: ProviderInstrument, interval: Interval, start: datetime, end: datetime
+    ) -> pd.DataFrame:
         if interval != Interval.D1:
             raise ValueError("synthetic fixture provides daily bars only")
         f = self._frames[instrument.provider_token]
@@ -156,12 +210,24 @@ class SyntheticMarket:
     def corporate_actions(self) -> list[tuple[str, CorporateAction]]:
         if self.split_ex_date is None:
             return []
-        return [(self.split_symbol, CorporateAction(instrument_id=0, ex_date=self.split_ex_date, kind="split",
-                                                    ratio_num=5, ratio_den=1,
-                                                    purpose="SYNTHETIC split 1:5", source=PROVIDER))]
+        return [
+            (
+                self.split_symbol,
+                CorporateAction(
+                    instrument_id=0,
+                    ex_date=self.split_ex_date,
+                    kind="split",
+                    ratio_num=5,
+                    ratio_den=1,
+                    purpose="SYNTHETIC split 1:5",
+                    source=PROVIDER,
+                ),
+            )
+        ]
 
-    async def stream(self, instruments: Sequence[ProviderInstrument], interval_s: float = 1.0,
-                     max_ticks: int | None = None) -> AsyncIterator[Quote | FeedStatus]:
+    async def stream(
+        self, instruments: Sequence[ProviderInstrument], interval_s: float = 1.0, max_ticks: int | None = None
+    ) -> AsyncIterator[Quote | FeedStatus]:
         """Simulated quotes around the last synthetic close (status=synthetic)."""
         rng = np.random.default_rng(self.seed + 1)
         last = {i.provider_token: float(self._frames[i.provider_token]["close"].iloc[-1]) for i in instruments}
@@ -171,15 +237,22 @@ class SyntheticMarket:
             for inst in instruments:
                 last[inst.provider_token] *= float(np.exp(rng.normal(0, 0.002)))
                 now = utcnow()
-                yield Quote(instrument_id=0, ltp=round(last[inst.provider_token], 2), source_ts=now,
-                            received_ts=now, provider=PROVIDER, status=DataStatus.SYNTHETIC,
-                            provider_token=inst.provider_token)
+                yield Quote(
+                    instrument_id=0,
+                    ltp=round(last[inst.provider_token], 2),
+                    source_ts=now,
+                    received_ts=now,
+                    provider=PROVIDER,
+                    status=DataStatus.SYNTHETIC,
+                    provider_token=inst.provider_token,
+                )
                 ticks += 1
             await asyncio.sleep(interval_s)
 
 
-def default_fixture(calendar: ExchangeCalendar | None = None, years: float = 6.0, n_stocks: int = 30,
-                    end: date | None = None) -> SyntheticMarket:
+def default_fixture(
+    calendar: ExchangeCalendar | None = None, years: float = 6.0, n_stocks: int = 30, end: date | None = None
+) -> SyntheticMarket:
     cal = calendar or ExchangeCalendar()
     end = end or datetime.now(UTC).date()
     start = end - timedelta(days=int(365 * years))

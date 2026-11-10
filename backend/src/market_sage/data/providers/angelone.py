@@ -44,9 +44,14 @@ WS_URL = "wss://smartapisocket.angelone.in/smart-stream"
 SCRIP_MASTER_URL = "https://margincalculator.angelbroking.com/OpenAPI_File/files/OpenAPIScripMaster.json"
 
 INTERVAL_CODES = {
-    Interval.M1: "ONE_MINUTE", Interval.M3: "THREE_MINUTE", Interval.M5: "FIVE_MINUTE",
-    Interval.M10: "TEN_MINUTE", Interval.M15: "FIFTEEN_MINUTE", Interval.M30: "THIRTY_MINUTE",
-    Interval.H1: "ONE_HOUR", Interval.D1: "ONE_DAY",
+    Interval.M1: "ONE_MINUTE",
+    Interval.M3: "THREE_MINUTE",
+    Interval.M5: "FIVE_MINUTE",
+    Interval.M10: "TEN_MINUTE",
+    Interval.M15: "FIFTEEN_MINUTE",
+    Interval.M30: "THIRTY_MINUTE",
+    Interval.H1: "ONE_HOUR",
+    Interval.D1: "ONE_DAY",
 }
 # WebSocket 2.0 exchange type codes.
 WS_EXCHANGE_TYPES = {"NSE": 1, "NFO": 2, "BSE": 3, "BFO": 4, "MCX": 5}
@@ -58,17 +63,27 @@ CAPABILITIES = ProviderCapabilities(
     exchanges=frozenset({"NSE", "BSE"}),
     intervals=frozenset(INTERVAL_CODES),
     # Most conservative of the conflicting published per-request windows.
-    max_days_per_request={Interval.M1: 30, Interval.M3: 60, Interval.M5: 90, Interval.M10: 90,
-                          Interval.M15: 200, Interval.M30: 200, Interval.H1: 400, Interval.D1: 2000},
+    max_days_per_request={
+        Interval.M1: 30,
+        Interval.M3: 60,
+        Interval.M5: 90,
+        Interval.M10: 90,
+        Interval.M15: 200,
+        Interval.M30: 200,
+        Interval.H1: 400,
+        Interval.D1: 2000,
+    },
     earliest_date={Interval.M1: date(2016, 1, 1), Interval.D1: date(1990, 1, 1)},
     max_live_subscriptions_per_connection=1000,
     max_live_connections=3,
-    rate_limits={"historical": RateLimit(per_second=2, per_minute=120, per_hour=5000),
-                 "quote": RateLimit(per_second=1), "default": RateLimit(per_second=5)},
+    rate_limits={
+        "historical": RateLimit(per_second=2, per_minute=120, per_hour=5000),
+        "quote": RateLimit(per_second=1),
+        "default": RateLimit(per_second=5),
+    },
     realtime=True,
     verified=False,
-    notes="Limits unverified; session invalidated daily at midnight IST; static IP only needed for orders "
-          "(not used).",
+    notes="Limits unverified; session invalidated daily at midnight IST; static IP only needed for orders (not used).",
 )
 
 
@@ -87,8 +102,15 @@ class AngelTokens:
 class AngelSession:
     """Login with client code + PIN + TOTP; re-login after the daily midnight invalidation."""
 
-    def __init__(self, api_key: str, client_code: str, pin: str, totp_secret: str,
-                 http: httpx.Client | None = None, now: Callable[[], datetime] = utcnow) -> None:
+    def __init__(
+        self,
+        api_key: str,
+        client_code: str,
+        pin: str,
+        totp_secret: str,
+        http: httpx.Client | None = None,
+        now: Callable[[], datetime] = utcnow,
+    ) -> None:
         self.api_key, self.client_code = api_key, client_code
         self._pin, self._totp = pin, totp_secret
         self._http = http or httpx.Client(base_url=API_BASE, timeout=20.0)
@@ -96,9 +118,16 @@ class AngelSession:
         self.tokens: AngelTokens | None = None
 
     def headers(self, auth: bool = True) -> dict[str, str]:
-        h = {"Content-Type": "application/json", "Accept": "application/json", "X-UserType": "USER",
-             "X-SourceID": "WEB", "X-ClientLocalIP": "127.0.0.1", "X-ClientPublicIP": "127.0.0.1",
-             "X-MACAddress": "00:00:00:00:00:00", "X-PrivateKey": self.api_key}
+        h = {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "X-UserType": "USER",
+            "X-SourceID": "WEB",
+            "X-ClientLocalIP": "127.0.0.1",
+            "X-ClientPublicIP": "127.0.0.1",
+            "X-MACAddress": "00:00:00:00:00:00",
+            "X-PrivateKey": self.api_key,
+        }
         if auth:
             h["Authorization"] = f"Bearer {self.ensure().jwt}"
         return h
@@ -114,8 +143,11 @@ class AngelSession:
 
     def login(self) -> AngelTokens:
         body = {"clientcode": self.client_code, "password": self._pin, "totp": pyotp.TOTP(self._totp).now()}
-        data = _unwrap(self._http.post("/rest/auth/angelbroking/user/v1/loginByPassword", json=body,
-                                       headers=self.headers(auth=False)))
+        data = _unwrap(
+            self._http.post(
+                "/rest/auth/angelbroking/user/v1/loginByPassword", json=body, headers=self.headers(auth=False)
+            )
+        )
         self.tokens = AngelTokens(data["jwtToken"], data["refreshToken"], data["feedToken"], self._ist_today())
         return self.tokens
 
@@ -130,8 +162,9 @@ def _unwrap(resp: httpx.Response) -> Any:
     return payload.get("data")
 
 
-def parse_scrip_master(records: list[dict[str, Any]], exchanges: Sequence[str] = ("NSE", "BSE")
-                       ) -> list[ProviderInstrument]:
+def parse_scrip_master(
+    records: list[dict[str, Any]], exchanges: Sequence[str] = ("NSE", "BSE")
+) -> list[ProviderInstrument]:
     """Extract cash-equity instruments from OpenAPIScripMaster.json records."""
     out = []
     for r in records:
@@ -145,13 +178,18 @@ def parse_scrip_master(records: list[dict[str, Any]], exchanges: Sequence[str] =
         if seg == "BSE" and itype not in ("", "AMXIDX"):
             continue
         tick = r.get("tick_size")
-        out.append(ProviderInstrument(
-            provider=PROVIDER, provider_token=str(r["token"]), exchange=str(seg),
-            symbol=sym.removesuffix("-EQ"), name=r.get("name"),
-            instrument_type="INDEX" if itype == "AMXIDX" else "EQ",
-            lot_size=int(float(r.get("lotsize") or 1)),
-            tick_size=float(tick) / 100.0 if tick not in (None, "") else None,  # published in paise
-        ))
+        out.append(
+            ProviderInstrument(
+                provider=PROVIDER,
+                provider_token=str(r["token"]),
+                exchange=str(seg),
+                symbol=sym.removesuffix("-EQ"),
+                name=r.get("name"),
+                instrument_type="INDEX" if itype == "AMXIDX" else "EQ",
+                lot_size=int(float(r.get("lotsize") or 1)),
+                tick_size=float(tick) / 100.0 if tick not in (None, "") else None,  # published in paise
+            )
+        )
     return out
 
 
@@ -163,11 +201,17 @@ def parse_candles(rows: list[list[Any]], interval: Interval, received_ts: dateti
     df["ts"] = list(ts.dt.to_pydatetime())
     df["session_date"] = list(ts.dt.tz_convert(IST).dt.date)
     if interval == Interval.D1:
-        df["source_ts"] = [ist_datetime(d, datetime.min.time().replace(hour=15, minute=30))
-                           for d in df["session_date"]]
+        df["source_ts"] = [ist_datetime(d, datetime.min.time().replace(hour=15, minute=30)) for d in df["session_date"]]
     else:
-        minutes = {Interval.M1: 1, Interval.M3: 3, Interval.M5: 5, Interval.M10: 10, Interval.M15: 15,
-                   Interval.M30: 30, Interval.H1: 60}[interval]
+        minutes = {
+            Interval.M1: 1,
+            Interval.M3: 3,
+            Interval.M5: 5,
+            Interval.M10: 10,
+            Interval.M15: 15,
+            Interval.M30: 30,
+            Interval.H1: 60,
+        }[interval]
         df["source_ts"] = list((ts + pd.Timedelta(minutes=minutes)).dt.to_pydatetime())  # bar close time
     for c in ("delivery_qty", "turnover", "trades"):
         df[c] = float("nan")
@@ -182,8 +226,12 @@ class AngelOneProvider:
 
     capabilities = CAPABILITIES
 
-    def __init__(self, session: AngelSession, http: httpx.Client | None = None,
-                 limiter_factory: Callable[[RateLimit], RateLimiter] = RateLimiter) -> None:
+    def __init__(
+        self,
+        session: AngelSession,
+        http: httpx.Client | None = None,
+        limiter_factory: Callable[[RateLimit], RateLimiter] = RateLimiter,
+    ) -> None:
         self.session = session
         self._http = http or httpx.Client(base_url=API_BASE, timeout=30.0)
         self._limiters = {k: limiter_factory(v) for k, v in CAPABILITIES.rate_limits.items()}
@@ -196,17 +244,24 @@ class AngelOneProvider:
             raise AngelError("scrip master unavailable or empty")
         return parse_scrip_master(data)
 
-    def fetch_bars(self, instrument: ProviderInstrument, interval: Interval, start: datetime,
-                   end: datetime) -> pd.DataFrame:
+    def fetch_bars(
+        self, instrument: ProviderInstrument, interval: Interval, start: datetime, end: datetime
+    ) -> pd.DataFrame:
         frames = []
         for a, b in plan_chunks(CAPABILITIES, interval, ensure_utc(start), ensure_utc(end)):
             self._limiters["historical"].acquire()
-            body = {"exchange": instrument.exchange, "symboltoken": instrument.provider_token,
-                    "interval": INTERVAL_CODES[interval],
-                    "fromdate": a.astimezone(IST).strftime("%Y-%m-%d %H:%M"),
-                    "todate": b.astimezone(IST).strftime("%Y-%m-%d %H:%M")}
-            data = _unwrap(self._http.post("/rest/secure/angelbroking/historical/v1/getCandleData",
-                                           json=body, headers=self.session.headers()))
+            body = {
+                "exchange": instrument.exchange,
+                "symboltoken": instrument.provider_token,
+                "interval": INTERVAL_CODES[interval],
+                "fromdate": a.astimezone(IST).strftime("%Y-%m-%d %H:%M"),
+                "todate": b.astimezone(IST).strftime("%Y-%m-%d %H:%M"),
+            }
+            data = _unwrap(
+                self._http.post(
+                    "/rest/secure/angelbroking/historical/v1/getCandleData", json=body, headers=self.session.headers()
+                )
+            )
             frames.append(parse_candles(data or [], interval, utcnow()))
         if not frames:
             return pd.DataFrame(columns=BAR_COLUMNS)
@@ -217,52 +272,85 @@ class AngelOneProvider:
         """REST polling fallback (FULL mode), batched conservatively at 50 tokens per request."""
         out: list[Quote] = []
         for i in range(0, len(instruments), 50):
-            batch = instruments[i:i + 50]
+            batch = instruments[i : i + 50]
             tokens: dict[str, list[str]] = {}
             for inst in batch:
                 tokens.setdefault(inst.exchange, []).append(inst.provider_token)
             self._limiters["quote"].acquire()
-            data = _unwrap(self._http.post("/rest/secure/angelbroking/market/v1/quote/",
-                                           json={"mode": "FULL", "exchangeTokens": tokens},
-                                           headers=self.session.headers()))
+            data = _unwrap(
+                self._http.post(
+                    "/rest/secure/angelbroking/market/v1/quote/",
+                    json={"mode": "FULL", "exchangeTokens": tokens},
+                    headers=self.session.headers(),
+                )
+            )
             received = utcnow()
             for q in (data or {}).get("fetched", []):
                 feed_time = q.get("exchFeedTime")
-                src = (datetime.strptime(feed_time, "%d-%b-%Y %H:%M:%S").replace(tzinfo=IST)
-                       if feed_time else received)
-                out.append(Quote(0, float(q["ltp"]), ensure_utc(src), received, PROVIDER,
-                                 open=q.get("open"), high=q.get("high"), low=q.get("low"),
-                                 prev_close=q.get("close"), volume=q.get("tradeVolume"),
-                                 status=DataStatus.LIVE, provider_token=str(q.get("symbolToken"))))
+                src = datetime.strptime(feed_time, "%d-%b-%Y %H:%M:%S").replace(tzinfo=IST) if feed_time else received
+                out.append(
+                    Quote(
+                        0,
+                        float(q["ltp"]),
+                        ensure_utc(src),
+                        received,
+                        PROVIDER,
+                        open=q.get("open"),
+                        high=q.get("high"),
+                        low=q.get("low"),
+                        prev_close=q.get("close"),
+                        volume=q.get("tradeVolume"),
+                        status=DataStatus.LIVE,
+                        provider_token=str(q.get("symbolToken")),
+                    )
+                )
         return out
 
     def holdings(self) -> Sequence[Holding]:
         self._limiters["default"].acquire()
-        data = _unwrap(self._http.get("/rest/secure/angelbroking/portfolio/v1/getHolding",
-                                      headers=self.session.headers()))
+        data = _unwrap(
+            self._http.get("/rest/secure/angelbroking/portfolio/v1/getHolding", headers=self.session.headers())
+        )
         out = []
         for h in data or []:
             if not h.get("tradingsymbol"):
                 continue  # reported data defect: holdings with null symbol are skipped, not guessed
-            out.append(Holding(None, h.get("exchange", "NSE"), str(h["tradingsymbol"]).removesuffix("-EQ"),
-                               int(h.get("quantity", 0)), float(h.get("averageprice", 0.0)), PROVIDER, raw=h))
+            out.append(
+                Holding(
+                    None,
+                    h.get("exchange", "NSE"),
+                    str(h["tradingsymbol"]).removesuffix("-EQ"),
+                    int(h.get("quantity", 0)),
+                    float(h.get("averageprice", 0.0)),
+                    PROVIDER,
+                    raw=h,
+                )
+            )
         return out
 
-    async def stream(self, instruments: Sequence[ProviderInstrument], mode: int = WS_MODE_QUOTE
-                     ) -> AsyncIterator[Quote | FeedStatus]:
+    async def stream(
+        self, instruments: Sequence[ProviderInstrument], mode: int = WS_MODE_QUOTE
+    ) -> AsyncIterator[Quote | FeedStatus]:
         """WebSocket 2.0 stream with heartbeat; yields FeedStatus on connect/disconnect."""
         import websockets
 
         if len(instruments) > CAPABILITIES.max_live_subscriptions_per_connection:
             raise AngelError("subscription exceeds per-connection token limit")
         tokens = self.session.ensure()
-        headers = {"Authorization": f"Bearer {tokens.jwt}", "x-api-key": self.session.api_key,
-                   "x-client-code": self.session.client_code, "x-feed-token": tokens.feed}
+        headers = {
+            "Authorization": f"Bearer {tokens.jwt}",
+            "x-api-key": self.session.api_key,
+            "x-client-code": self.session.client_code,
+            "x-feed-token": tokens.feed,
+        }
         token_list: dict[int, list[str]] = {}
         for inst in instruments:
             token_list.setdefault(WS_EXCHANGE_TYPES[inst.exchange], []).append(inst.provider_token)
-        sub = {"correlationID": "marketsage01", "action": 1, "params": {
-            "mode": mode, "tokenList": [{"exchangeType": k, "tokens": v} for k, v in token_list.items()]}}
+        sub = {
+            "correlationID": "marketsage01",
+            "action": 1,
+            "params": {"mode": mode, "tokenList": [{"exchangeType": k, "tokens": v} for k, v in token_list.items()]},
+        }
         async with websockets.connect(WS_URL, additional_headers=headers, ping_interval=None) as ws:
             yield FeedStatus(PROVIDER, True, utcnow(), message="connected")
             await ws.send(json.dumps(sub))
@@ -304,12 +392,20 @@ def parse_ws_packet(buf: bytes, received_ts: datetime) -> Quote | None:
         _lq, _avg, vol = struct.unpack_from("<qqq", buf, 51)
         o, h, lo, c = struct.unpack_from("<qqqq", buf, 91)
         kwargs = {"open": o / 100, "high": h / 100, "low": lo / 100, "prev_close": c / 100, "volume": float(vol)}
-    return Quote(0, ltp / 100.0, ensure_utc(src), received_ts, PROVIDER, status=DataStatus.LIVE,
-                 provider_token=token, **kwargs)
+    return Quote(
+        0, ltp / 100.0, ensure_utc(src), received_ts, PROVIDER, status=DataStatus.LIVE, provider_token=token, **kwargs
+    )
 
 
-def build_ws_packet(token: str, exch_ms: int, ltp_paise: int, mode: int = WS_MODE_LTP, exchange_type: int = 1,
-                    ohlc_paise: tuple[int, int, int, int] = (0, 0, 0, 0), volume: int = 0) -> bytes:
+def build_ws_packet(
+    token: str,
+    exch_ms: int,
+    ltp_paise: int,
+    mode: int = WS_MODE_LTP,
+    exchange_type: int = 1,
+    ohlc_paise: tuple[int, int, int, int] = (0, 0, 0, 0),
+    volume: int = 0,
+) -> bytes:
     """Test helper: encode a packet in the layout parse_ws_packet expects (SYNTHETIC, for tests)."""
     head = struct.pack("<BB25sqqq", mode, exchange_type, token.encode().ljust(25, b"\x00"), 1, exch_ms, ltp_paise)
     if mode == WS_MODE_LTP:
