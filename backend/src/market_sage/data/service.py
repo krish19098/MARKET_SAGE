@@ -301,12 +301,17 @@ class MarketDataService:
         key = (as_of, n, lookback)
         if key in self._universe_cache:
             return self._universe_cache[key]
+        # Rank only bars inside the calendar window, so renamed/delisted symbols drop out instead of
+        # keeping their last liquidity forever.
+        window_start = as_of
+        for _ in range(lookback - 1):
+            window_start = self.calendar.previous_trading_day(window_start)
         scores = []
         for inst in self.instruments.all(include_indices=False):
             df = self.bars.read(inst["exchange"], Interval.D1, inst["id"])
             if df.empty:
                 continue
-            df = df[df["session_date"] <= as_of].tail(lookback)
+            df = df[(df["session_date"] >= window_start) & (df["session_date"] <= as_of)]
             if len(df) < lookback // 2:
                 continue
             scores.append((float((df["close"] * df["volume"]).median()), inst["id"]))

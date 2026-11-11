@@ -12,7 +12,12 @@ from market_sage.analysis.analyst import cutoff_datetime
 from market_sage.container import Container, recommendation_from_ledger
 from market_sage.core.timeutil import IST, utcnow
 from market_sage.data.providers import angelone
-from market_sage.learning.controlled import drift_check, run_learning_cycle, snapshot_evaluation_dataset
+from market_sage.learning.controlled import (
+    InsufficientHistory,
+    drift_check,
+    run_learning_cycle,
+    snapshot_evaluation_dataset,
+)
 from market_sage.monitoring.service import token_map_for
 from market_sage.portfolio.allocator import Holding, allocate
 from market_sage.portfolio.risk import settings_for_mode
@@ -110,7 +115,7 @@ def learning_job(c: Container, now: datetime | None = None) -> dict:
     try:
         res = run_learning_cycle(c.store, c.registry, cutoff, is_synthetic=synthetic)
         out = {"candidate_id": res.candidate_id, "promoted": res.promoted, "failed": res.gate_report["failed_checks"]}
-    except ValueError as exc:
+    except InsufficientHistory as exc:
         out = {"skipped": str(exc)}
     out["drift"] = drift_check(c.engine, c.registry)
     out["evaluation_dataset"] = snapshot_evaluation_dataset(c.engine, c.settings.data_dir / "evaluation")

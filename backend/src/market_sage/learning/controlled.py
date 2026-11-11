@@ -28,6 +28,10 @@ from market_sage.models.walkforward import economic_utility
 TARGET = "tb5_atr"
 
 
+class InsufficientHistory(ValueError):
+    """Not enough labelled sessions for walk-forward folds plus the holdout; a normal skip, not a failure."""
+
+
 @dataclass(frozen=True)
 class GateCriteria:
     """Defined before evaluation and stored with every gate report."""
@@ -68,7 +72,7 @@ def run_learning_cycle(store: FeatureStore, registry: ModelRegistry, cutoff: dat
     full = build_dataset(store, cutoff, contract, store.mds.liquid_universe(cutoff, universe_size))
     sessions = np.array(sorted(full["session_date"].unique()))
     if len(sessions) <= criteria.holdout_sessions + 400:
-        raise ValueError("insufficient history for a learning cycle")
+        raise InsufficientHistory("insufficient history for a learning cycle")
     hold_start = sessions[-criteria.holdout_sessions]
     train_data = full[full["label_known"] < hold_start]  # candidate never sees holdout labels
     hold = full[full["session_date"] >= hold_start]

@@ -10,13 +10,19 @@ test calls.
 | EOD OHLCV (source of record) | NSE `sec_bhavdata_full` | `nse_archive` | ✅ parser, client, buffered ingestion, holiday inference | ✅ 2026-11-11 live files parsed; UDiFF vs full bhavcopy: 0 close mismatches / 3,435 rows | A non-trading date's URL served the previous session's file; date-mismatch guard added |
 | Delivery qty/% | NSE `sec_bhavdata_full` | `nse_archive` | ✅ | ✅ 3,191/3,435 rows with delivery on 09-Nov-2026 | Brokers do not supply delivery data |
 | Corporate actions | NSE corporate-actions API | `nse_archive` | ✅ subject parser (split/bonus/dividend/rights/demerger) + storage + L2 adjustment | ✅ live API: 991 records Aug–Nov 2026, no split/bonus misclassified; `caBroadcastDate` stored as published_at | Rights/demerger flagged, not price-adjusted (limitation) |
-| Index closes (regime, RS) | NSE `ind_close_all` | `nse_archive` | ✅ | ✅ 167 indices on 09-Nov-2026 | Sector membership of stocks not yet mapped |
+| Index closes (regime, RS) | NSE `ind_close_all` | `nse_archive` | ✅ | ✅ 167 indices on 09-Nov-2026; 111,152 rows backfilled | Sector membership of stocks not yet mapped, so `rs_sector20` is empty |
 | Universe / symbols / ISIN | NSE `EQUITY_L.csv` + bhavcopy history | `nse_archive` | ✅ parser; symbol change via ISIN | ✅ 2,633 rows | Survivorship control: instruments are never deleted |
 | Intraday history | Angel One SmartAPI `getCandleData` | `angelone` | ✅ chunk planner, rate limiter, parser | ❌ needs owner credentials | Conservative per-request windows (sources conflict) |
 | Live quotes | Angel One WebSocket 2.0 (+ REST quote fallback) | `angelone` | ✅ session, subscription, binary parser, heartbeat | ❌ needs credentials | 1,000 tokens/session, 3 connections |
 | Holdings (read-only) | Angel One `getHolding` | `angelone` | ✅ | ❌ | Manual position entry is the default |
 | Fundamentals | NSE/BSE filings (XBRL, broadcast timestamps) | — | ✅ point-in-time accessor + schema; ingestion adapter **not yet built** | ❌ | Analyst reports "fundamentals unknown" until filings exist |
 | Development/testing | Synthetic market | `fixture` | ✅ | n/a | Labelled SYNTHETIC everywhere; optional planted signal for pipeline tests |
+
+## Real backfill (2026-11-11)
+2023-06-01 → 2026-11-10: 848 sessions, 2,294,390 daily bars, 4,090 instruments, 8,168 corporate actions. Quality log: 83,841
+`missing_session` (info; illiquid/suspended names), 766 `extreme_move` (mostly unadjusted splits/bonuses at L1), 40
+`file_date_mismatch` (holiday URLs serving the previous file; correctly treated as non-sessions). The liquid universe is
+ranked only on bars inside the calendar window, so renamed/delisted symbols drop out.
 
 ## Licensing notes
 - NSE archive files: personal, non-commercial use under the NSE Data Usage Policy. No redistribution, no public dashboards.

@@ -67,11 +67,14 @@ class SkModel:
         self.name, self.model = name, model
 
     def fit(self, X: pd.DataFrame, y: np.ndarray) -> SkModel:
-        self.model.fit(X, y.astype(int))
+        # Features never observed in the training window (e.g. sector RS before sector mapping exists)
+        # carry no information and break HGB binning; drop them for both fit and predict.
+        self.columns = [c for c in X.columns if X[c].notna().any()]
+        self.model.fit(X[self.columns], y.astype(int))
         return self
 
     def predict_proba(self, X: pd.DataFrame) -> np.ndarray:
-        return _full_proba(self.model, X)
+        return _full_proba(self.model, X[getattr(self, "columns", list(X.columns))])
 
 
 def make_estimator(name: str, seed: int = 0) -> Estimator:

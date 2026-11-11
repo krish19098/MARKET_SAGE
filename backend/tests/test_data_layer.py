@@ -221,3 +221,10 @@ def test_parse_index_closes():
     last = df.iloc[-1]
     assert last["open"] == last["high"] == last["low"] == last["close"] == 500
     assert df.iloc[0]["session_date"] == date(2026, 11, 3)
+
+
+def test_liquid_universe_excludes_instruments_that_stopped_trading(mds, market):
+    """A renamed/delisted symbol must not keep its last liquidity forever (PIT universe)."""
+    assert len(mds.liquid_universe(market.end, 5)) == 5
+    later = mds.calendar.add_sessions(market.end, 61)  # the whole 60-session window is after the last bar
+    assert mds.liquid_universe(later, 5) == []

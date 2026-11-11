@@ -4,14 +4,14 @@
 
 ## Current milestone
 - Name: M12 — Paper trading on real data, operational hardening, deployment
-- Status: **Blocked on external dependencies** (network access to NSE/Angel One hosts, Angel One credentials, a VM). All code milestones M0–M11 are implemented and tested on synthetic/sample data.
+- Status: **Partially complete; blocked on owner actions** (Angel One credentials, a VM). M0–M11 implemented and tested. NSE adapters verified live; 3.4 years of real NSE history ingested; first real-data learning cycle run: **no validated edge** (candidate rejected, see below).
 - Last updated (IST): 2026-11-11
 
 ## Product and architecture
 - Frontend: React 18 + TypeScript + Vite installable PWA (`frontend/`). Five screens plus alert history. Bottom nav on phones, icon rail on tablets, sidebar on desktop. Service worker (precache + Web Push).
 - Backend: Python 3.13, FastAPI (`backend/src/market_sage`). Single-user auth (argon2 + optional TOTP, httpOnly JWT cookie).
 - Database/storage: PostgreSQL 16 (production) / SQLite (local), Alembic migrations, append-only ledger tables enforced by DB triggers + hash chain. Parquet bar store; immutable raw-file store with checksums.
-- Market data providers: broker-independent adapters. NSE archives (EOD, delivery, corporate actions, universe) and Angel One SmartAPI (live WS, intraday, tokens, read-only holdings) implemented but **not yet verified against the live services**. Synthetic fixture for development.
+- Market data providers: broker-independent adapters. NSE archives (EOD, delivery, indices, corporate actions, universe) **verified live** and used for the real backfill. Angel One SmartAPI (live WS, intraday, tokens, read-only holdings) implemented; scrip master verified, REST/WS **await credentials**. Synthetic fixture for development.
 - Prediction/model stack: point-in-time feature store (fs1), regime classifier, kNN analogues, triple-barrier target, model ladder (climatology → momentum → logistic → RF → HistGradientBoosting), purged walk-forward, isotonic calibration, registry with promotion/rollback, early-setup lifecycle detectors.
 - Decision/risk: suppression gate, model-skill requirement, EV after costs, 13-part thesis, versioned risk settings, cost model (unverified schedule), risk-based sizing, allocator (balanced/growth, cash allowed).
 - Monitoring/notifications: always-on worker (APScheduler, IST), live session with reconnect, position state machine, 12 alert classes with stages, dedupe/cooldown, feed-stale fail-safe, Web Push with delivery log.
@@ -32,14 +32,23 @@
 | M10 evaluation + controlled learning + paper broker | acceptance 6–12, 18 | 2026-11-11 |
 | M11 API + PWA | `test_api.py`, vitest, Playwright screenshots on phone/tablet/desktop | 2026-11-11 |
 | Synthetic end-to-end demo (`market-sage demo`) | gated model promoted on planted-signal synthetic data; 40 sessions replayed; 3,864 evaluations; ledger integrity 0 problems | 2026-11-11 |
+| M1 NSE verification + real backfill | 2023-06-01 → 2026-11-10: 848 sessions, 2,294,390 bars, 4,090 instruments, 111,152 index rows, 8,168 corporate actions; 40 stale holiday files caught by the date guard | 2026-11-11 |
+| First real-data learning cycle | Candidate rejected on 5/6 gates; nothing promoted (details in "Real-data results") | 2026-11-11 |
+| Real-data post-close pipeline | 193 liquid stocks evaluated → 193 AVOID, 0 BUY, probabilities not issued; ledger 193 records, 0 integrity problems | 2026-11-11 |
 | Docs: README run procedures, data sources, decisions, deployment, test report | `README.md`, `docs/*` | 2026-11-11 |
 
 ## In progress
 | Item | Current state | Next action |
 |---|---|---|
-| M1 provider verification | Adapters built from researched specs; `capabilities.verified=False` | Allow hosts / run on owner machine; test calls; set verified flags and correct limits |
-| M12 paper trading on real data | Paper broker + worker ready | Deploy, ingest real history, run ≥ 3 months of paper trading before any reliance |
+| M1 provider verification | NSE done (`verified=True`); Angel One scrip master done | Angel One REST/WS test calls on the VM with owner credentials |
+| M12 paper trading on real data | Real history ingested; system correctly in AVOID/cash mode | Deploy; extend history to ≥ 5 years; map sector membership; weekly learning cycles; ≥ 3 months of paper trading before any reliance |
 | Fundamentals ingestion (D3) | PIT accessor + `filings` schema done; analyst shows "unknown" | Build NSE filings/XBRL adapter with broadcast timestamps |
+
+## Real-data results (2026-11-11, honest)
+- Learning cycle at cutoff 2026-11-09, universe = top 200 by 60-session median traded value (PIT), target `tb5_atr`, holdout from 2026-08-06 (60 sessions, 11,280 rows), training 2023-11-09 → 2026-07-29 (first ~220 sessions consumed by indicator warm-up).
+- Walk-forward OOS Brier (lower is better): climatology 0.6539, momentum 0.6546, logistic 0.6549, random forest 0.6658, HGB 0.6756. **No learner beat climatology.** HGB/RF showed small positive mean net per trade (+0.18% / +0.02%) with large drawdowns; logistic +1.04% on only 72 trades. None of this passes the predefined gates, and it is not evidence of an edge.
+- Holdout: climatology 0.6259 vs training-frequency climatology 0.6244 (fails). Decision: **rejected**; no production model; the app shows AVOID and does not issue probabilities.
+- Missing inputs that may matter: sector membership (`rs_sector20` is empty), fundamentals, only 3.4 years of history.
 
 ## Decisions and rationale
 See `docs/DECISIONS.md` (ADR-01…ADR-18) and `docs/DECISION_BRIEF_D1-D7.md`. Key points: paper-only execution; Angel One + NSE official files behind broker-independent adapters; no probabilities or BUYs without a validated out-of-sample edge; ledger never back-dated.
@@ -47,7 +56,7 @@ See `docs/DECISIONS.md` (ADR-01…ADR-18) and `docs/DECISION_BRIEF_D1-D7.md`. Ke
 ## Data and external dependencies
 | Provider/service | Configured? | Credentials/subscription/licensing | Limitations |
 |---|---|---|---|
-| NSE archives | Code ready; **host blocked in dev env** | Free; personal non-commercial use | Formats/URLs unverified live |
+| NSE archives | **Verified live**; real history ingested | Free; personal non-commercial use | Non-trading dates may serve the previous file (guarded) |
 | Angel One SmartAPI | Code ready; **no credentials** | Free with owner account; TOTP secret needed for automation | Limits unverified; daily midnight session reset |
 | Fundamentals (NSE/BSE filings) | Not built | Free | Parsing effort; PIT via broadcast timestamps |
 | Web Push (VAPID) | Code ready; keys not generated | `market-sage vapid-keys` | Needs HTTPS deployment; best-effort delivery |
@@ -56,25 +65,26 @@ See `docs/DECISIONS.md` (ADR-01…ADR-18) and `docs/DECISION_BRIEF_D1-D7.md`. Ke
 
 ## Tests and validation
 - Commands run: `uv run ruff check src tests`, `uv run mypy src`, `uv run pytest` (SQLite and PostgreSQL), `npm run lint`, `npm test`, `npm run build`, Playwright screenshot script against the running app.
-- Results: backend 56 passed (SQLite); full suite passed on PostgreSQL; lint/types clean; frontend 3 tests passed, build OK; UI verified on phone/tablet/desktop.
+- Results: backend 60 passed (SQLite); full suite passed on PostgreSQL earlier; lint/types clean; frontend 3 tests passed, build OK; UI verified on phone/tablet/desktop.
 - Failed tests: none at the last run.
-- Backtest/paper-trading evidence: **none on real data.** Walk-forward and paper results exist only for SYNTHETIC data and are not market evidence.
+- Backtest evidence on real data: walk-forward on real NSE data found **no edge over climatology** (see Real-data results). No real-data paper-trading period yet.
 - What is synthetic or mocked: fixture market (optionally with planted signal); SAMPLE NSE files; fake NSE client; synthetic WS packets built to the researched layout.
 
 ## Known bugs and risks
 | Issue | Severity | Workaround / next step |
 |---|---|---|
-| Live provider formats/limits unverified (NSE URLs, Angel WS binary layout, rate limits) | High | M1 verification with real access before relying on live data |
+| Angel One REST/WS formats and limits unverified | High | Test calls with owner credentials on the VM |
+| Sector membership not mapped (`rs_sector20` empty) | Medium | Map NSE sector index constituents point-in-time |
 | Cost schedule unverified | Medium | Reconcile `charges_v1.json` with an Angel One contract note |
 | Holiday calendar empty for 2026+ | Medium | Fill `holidays.csv` from NSE circular (past holidays are inferred) |
 | Paper simulation uses daily bars (no intraday path) | Medium | Documented; intraday simulation once intraday data is verified |
-| No validated edge on real data yet | High (product) | System will show AVOID/cash until a model passes the gates on real data |
+| No validated edge on real data (measured 2026-11-11) | High (product) | System shows AVOID/cash; improve inputs (sector, fundamentals, longer history) and re-run weekly gated cycles |
 | Fundamentals absent | Medium | D3 adapter |
 | Per-cutoff analysis ~2 s per 16 stocks | Low | Fine for EOD; optimise analogue search for 500+ stocks if needed |
 
 ## Next concrete tasks
-1. Owner: allow NSE/BSE/Angel documentation hosts in the cloud dev environment (or run on own machine) and provide Angel One credentials on the VM only. Then verify adapters (M1) and set `verified=True` with corrected limits.
-2. Ingest real NSE history (≥ 5 years), fill the holiday calendar, reconcile the cost schedule, run the learning cycle on real data and report the honest result.
+1. Owner: provide Angel One credentials on the VM only; verify REST/WS and set `verified=True` with corrected limits.
+2. Extend real history to ≥ 5 years, map sector membership PIT, fill the holiday calendar, reconcile the cost schedule; re-run the gated learning cycle.
 3. Provision the VM, `docker compose up`, configure the heartbeat, VAPID and private HTTPS. Start the real-data paper-trading period.
 4. Build the NSE filings/XBRL fundamentals adapter (D3).
 

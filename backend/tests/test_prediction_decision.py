@@ -218,3 +218,15 @@ def test_model_rollback_preserves_previous(world):
     assert reg.production_row(TARGET)["id"] == cand_id
     restored = reg.rollback(TARGET)
     assert restored == prod["id"] and reg.production_row(TARGET)["id"] == prod["id"]
+
+
+def test_estimators_ignore_features_never_observed():
+    """An all-missing feature (e.g. sector RS before sector mapping) must not break any learner."""
+    from market_sage.models.estimators import make_estimator
+
+    rng = np.random.default_rng(0)
+    X = pd.DataFrame({"a": rng.normal(size=600), "b": rng.normal(size=600), "empty": np.nan})
+    y = rng.choice([-1, 0, 1], size=600)
+    for name in ("logistic", "random_forest", "hgb"):
+        p = make_estimator(name).fit(X, y).predict_proba(X)
+        assert p.shape == (600, 3) and np.allclose(p.sum(axis=1), 1.0)

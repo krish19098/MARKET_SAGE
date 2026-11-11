@@ -4,7 +4,7 @@
 
 | Suite | Command | Result |
 |---|---|---|
-| Backend, SQLite | `uv run pytest` | **56 passed** |
+| Backend, SQLite | `uv run pytest` | **60 passed** |
 | Backend, PostgreSQL 16 | `MARKET_SAGE_TEST_DATABASE_URL=… uv run pytest` | **passed** (full suite; earlier 55-test run also passed) |
 | Lint / types | `ruff check src tests` · `mypy src` | clean · clean (76 files) |
 | Frontend | `npm run lint` (tsc) · `npm test` (vitest, 3) · `npm run build` | clean · passed · built (SW + manifest generated) |
@@ -13,6 +13,16 @@
 **Data used:** all automated tests use SYNTHETIC fixtures or SAMPLE files that follow the published file layouts. **No result here is
 market validation.** The "skilled model" tests deliberately plant a learnable signal in synthetic data to exercise the BUY path. On
 signal-free synthetic data, the system correctly finds **no edge** and issues no BUY.
+
+## Real-data runs (NSE, 2023-06-01 → 2026-11-10)
+| Run | Result |
+|---|---|
+| `market-sage ingest-nse` | 848 sessions, 2,294,390 bars, 4,090 instruments, 111,152 index rows, 8,168 corporate actions; 40 holiday URLs serving a stale file were rejected by the date guard |
+| `market-sage learn` | Candidate rejected (failed: Brier skill, OOS trades, OOS mean net, fold stability, holdout vs climatology). OOS Brier: climatology 0.6539 < every learner. **No validated edge.** |
+| `market-sage post-close` | 193 evaluated, 193 AVOID, 0 BUY, probabilities not issued; 5 early-bullish alerts labelled "not confirmed" |
+| `market-sage verify-ledger` | 193 predictions, 0 integrity problems |
+
+Bugs found by the real runs, fixed with regression tests: the liquid universe kept renamed/delisted symbols (e.g. ZOMATO after the rename to ETERNAL) at their last liquidity (`test_liquid_universe_excludes_instruments_that_stopped_trading`); an all-missing feature crashed HGB, and the worker reported the crash as a routine "skipped" (`test_estimators_ignore_features_never_observed`; only `InsufficientHistory` is now a skip).
 
 ## Mandatory acceptance tests (VALIDATION_TESTING.md)
 
@@ -46,7 +56,7 @@ cooldown, notification retries, migrations on SQLite + PostgreSQL, model rollbac
 analogue look-ahead exclusion, the reference RSI implementation, failed-breakout logic.
 
 ## Not yet verified (requires external access)
-- Live NSE archive downloads and Angel One SmartAPI calls (hosts blocked in the dev environment; credentials not provided).
+- Angel One SmartAPI REST/WebSocket calls (credentials not provided). NSE archives are verified.
 - Real Web Push delivery to an Android device (needs VAPID keys + HTTPS deployment).
 - Docker image build and the 24×7 VM deployment.
-- Any performance on real market data. A paper-trading period on real data has not started.
+- A real-data paper-trading period has not started. Walk-forward on real data found no edge.
