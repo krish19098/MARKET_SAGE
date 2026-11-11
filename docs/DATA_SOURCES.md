@@ -7,12 +7,13 @@ test calls.
 
 | Role | Primary source | Adapter | Implemented | Verified against live service | Notes |
 |---|---|---|---|---|---|
-| EOD OHLCV (source of record) | NSE `sec_bhavdata_full` | `nse_archive` | ✅ parser, client, ingestion, holiday inference | ❌ blocked: host not reachable from the dev environment | UDiFF CM bhavcopy parser also implemented |
-| Delivery qty/% | NSE `sec_bhavdata_full` | `nse_archive` | ✅ | ❌ | Brokers do not supply delivery data |
-| Corporate actions | NSE corporate-actions API | `nse_archive` | ✅ subject parser (split/bonus/dividend) + storage + L2 adjustment | ❌ | Adjustment always computed in-house |
-| Universe / symbols / ISIN | NSE `EQUITY_L.csv` + bhavcopy history | `nse_archive` | ✅ parser; symbol change via ISIN | ❌ | Survivorship control: instruments are never deleted |
+| EOD OHLCV (source of record) | NSE `sec_bhavdata_full` | `nse_archive` | ✅ parser, client, buffered ingestion, holiday inference | ✅ 2026-11-11 live files parsed; UDiFF vs full bhavcopy: 0 close mismatches / 3,435 rows | A non-trading date's URL served the previous session's file; date-mismatch guard added |
+| Delivery qty/% | NSE `sec_bhavdata_full` | `nse_archive` | ✅ | ✅ 3,191/3,435 rows with delivery on 09-Nov-2026 | Brokers do not supply delivery data |
+| Corporate actions | NSE corporate-actions API | `nse_archive` | ✅ subject parser (split/bonus/dividend/rights/demerger) + storage + L2 adjustment | ✅ live API: 991 records Aug–Nov 2026, no split/bonus misclassified; `caBroadcastDate` stored as published_at | Rights/demerger flagged, not price-adjusted (limitation) |
+| Index closes (regime, RS) | NSE `ind_close_all` | `nse_archive` | ✅ | ✅ 167 indices on 09-Nov-2026 | Sector membership of stocks not yet mapped |
+| Universe / symbols / ISIN | NSE `EQUITY_L.csv` + bhavcopy history | `nse_archive` | ✅ parser; symbol change via ISIN | ✅ 2,633 rows | Survivorship control: instruments are never deleted |
 | Intraday history | Angel One SmartAPI `getCandleData` | `angelone` | ✅ chunk planner, rate limiter, parser | ❌ needs owner credentials | Conservative per-request windows (sources conflict) |
-| Live quotes | Angel One WebSocket 2.0 (+ REST quote fallback) | `angelone` | ✅ session, subscription, binary parser, heartbeat | ❌ | 1,000 tokens/session, 3 connections |
+| Live quotes | Angel One WebSocket 2.0 (+ REST quote fallback) | `angelone` | ✅ session, subscription, binary parser, heartbeat | ❌ needs credentials | 1,000 tokens/session, 3 connections |
 | Holdings (read-only) | Angel One `getHolding` | `angelone` | ✅ | ❌ | Manual position entry is the default |
 | Fundamentals | NSE/BSE filings (XBRL, broadcast timestamps) | — | ✅ point-in-time accessor + schema; ingestion adapter **not yet built** | ❌ | Analyst reports "fundamentals unknown" until filings exist |
 | Development/testing | Synthetic market | `fixture` | ✅ | n/a | Labelled SYNTHETIC everywhere; optional planted signal for pipeline tests |

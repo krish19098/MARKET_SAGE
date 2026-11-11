@@ -21,7 +21,7 @@ from market_sage.data.adjust import adjust_bars
 from market_sage.data.models import BAR_COLUMNS, CorporateAction, DataStatus, Interval, Quote
 from market_sage.data.providers import nse_archive
 from market_sage.data.providers.fixture import SyntheticMarket
-from market_sage.data.quality import check_daily_bars
+from market_sage.data.quality import QualityIssue, check_daily_bars
 from market_sage.db import schema as s
 
 
@@ -48,6 +48,10 @@ class MarketDataService:
         self.bars = storage.BarStore(data_dir)
         self.instruments = storage.InstrumentRegistry(engine)
         self._latest_quotes: dict[int, Quote] = {}
+        self._pending: list[pd.DataFrame] = []
+        self._iid_cache: dict[tuple[str, str], int] = {}
+        self._flush_rows = 250_000
+        self._universe_cache: dict[tuple[date, int, int], list[int]] = {}
         self._load_calendar_days()
 
     # --- calendar ----------------------------------------------------------------------------
@@ -86,7 +90,7 @@ class MarketDataService:
                 .values(finished_at=utcnow(), status=rep.status, rows=rep.rows, message=rep.message[:2000])
             )
 
-    def _record_issues(self, run_id: int, instrument_id: int, issues: list) -> int:
+    def _record_issues(self, run_id: int, instrument_id: int | None, issues: list) -> int:
         if not issues:
             return 0
         now = utcnow()
@@ -234,6 +238,17 @@ class MarketDataService:
                             licence_note=nse_archive.LICENCE_NOTE,
                         )
                         frame = nse_archive.parse_full_bhavcopy(content, utcnow(), raw_id)
+                        file_dates = set(frame["session_date"])
+                        if file_dates != {d}:
+                            # Observed live: for a non-trading date NSE can serve the previous session's file.
+                            rep.missing_files.append(d)
+                            self._record_issues(run, None, [QualityIssue(
+                                "file_date_mismatch", "warn", d,
+                                f"requested {d}, file contains {sorted(map(str, file_dates))}; treated as no session")])
+                            if d < utcnow().date():
+                                self._record_calendar_day(d, "holiday", "inferred: NSE file for date not published")
+                            d += timedelta(days=1)
+                            continue
                         touched |= self._store_eod_frame(frame)
                         rep.rows += len(frame)
                         rep.sessions += 1
@@ -243,6 +258,7 @@ class MarketDataService:
             rep.status, rep.message = "failed", f"{type(exc).__name__}: {exc}"
             self._finish_run(rep)
             raise
+        touched |= self._flush_eod()
         for iid in touched:
             known = {c.ex_date for c in self.corporate_actions(iid)}
             rep.issues += self._record_issues(
@@ -252,14 +268,93 @@ class MarketDataService:
         self._finish_run(rep)
         return rep
 
+    def ingest_nse_indices(self, start: date, end: date, client: nse_archive.NseArchiveClient | None = None
+                           ) -> IngestReport:
+        """Daily closes of all NSE indices (market regime / relative-strength inputs)."""
+        client = client or nse_archive.NseArchiveClient()
+        run = self._start_run(nse_archive.PROVIDER, "ind_close_all")
+        rep = IngestReport(nse_archive.PROVIDER, "ind_close_all", run)
+        d = start
+        while d <= end:
+            if d.weekday() < 5 and self.calendar.is_trading_day(d):
+                url = nse_archive.index_close_url(d)
+                content = client.get(url)
+                if content is None:
+                    rep.missing_files.append(d)
+                else:
+                    raw_id = self.raw.save(nse_archive.PROVIDER, "ind_close_all", url, content,
+                                           f"ind_close_all_{d:%d%m%Y}.csv", licence_note=nse_archive.LICENCE_NOTE)
+                    frame = nse_archive.parse_index_closes(content, utcnow(), raw_id)
+                    frame = frame[frame["session_date"] == d]  # same stale-copy guard as equities
+                    for sym, g in frame.groupby("symbol"):
+                        iid = self.instruments.get_or_create("NSE", str(sym), name=g.iloc[0]["name"], series="INDEX",
+                                                             is_index=True)
+                        self.bars.upsert("NSE", Interval.D1, iid, g[BAR_COLUMNS])
+                    rep.rows += len(frame)
+                    rep.sessions += 1
+            d += timedelta(days=1)
+        self._finish_run(rep)
+        return rep
+
+    def liquid_universe(self, as_of: date, n: int = 200, lookback: int = 60) -> list[int]:
+        """Top-n equities by median traded value over the ``lookback`` sessions up to ``as_of`` (PIT)."""
+        key = (as_of, n, lookback)
+        if key in self._universe_cache:
+            return self._universe_cache[key]
+        scores = []
+        for inst in self.instruments.all(include_indices=False):
+            df = self.bars.read(inst["exchange"], Interval.D1, inst["id"])
+            if df.empty:
+                continue
+            df = df[df["session_date"] <= as_of].tail(lookback)
+            if len(df) < lookback // 2:
+                continue
+            scores.append((float((df["close"] * df["volume"]).median()), inst["id"]))
+        out = [iid for _, iid in sorted(scores, reverse=True)[:n]]
+        self._universe_cache[key] = out
+        return out
+
+    def ingest_nse_corporate_actions(self, start: date, end: date,
+                                     client: nse_archive.NseArchiveClient | None = None) -> IngestReport:
+        """Corporate actions for symbols already in the warehouse; broadcast time stored as published_at."""
+        client = client or nse_archive.NseArchiveClient()
+        run = self._start_run(nse_archive.PROVIDER, "corporate_actions")
+        rep = IngestReport(nse_archive.PROVIDER, "corporate_actions", run)
+        url = nse_archive.corporate_actions_url(start, end)
+        content = client.get(url, api=True) or b"[]"
+        raw_id = self.raw.save(nse_archive.PROVIDER, "corporate_actions", url, content,
+                               f"corporate_actions_{start}_{end}.json", licence_note=nse_archive.LICENCE_NOTE)
+        for symbol, ca, published in nse_archive.parse_corporate_actions(json.loads(content)):
+            inst = self.instruments.by_symbol("NSE", symbol)
+            if inst is None:
+                continue
+            self.add_corporate_action(inst["id"], ca, raw_id, published_at=published)
+            rep.rows += 1
+        self._finish_run(rep)
+        return rep
+
     def _store_eod_frame(self, frame: pd.DataFrame) -> set[int]:
+        self._pending.append(frame)
+        if sum(len(f) for f in self._pending) >= self._flush_rows:
+            return self._flush_eod()
+        return set()
+
+    def _flush_eod(self) -> set[int]:
+        """Write buffered bhavcopy rows: one Parquet upsert per instrument per flush (fast backfills)."""
+        if not self._pending:
+            return set()
+        allf = pd.concat(self._pending, ignore_index=True)
+        self._pending = []
         touched = set()
-        for sym, g in frame.groupby("symbol"):
-            first = g.iloc[0]
-            iid = self.instruments.get_or_create(
-                "NSE", str(sym), isin=first.get("isin") or None, name=first.get("name"), series=first.get("series")
-            )
-            self.bars.upsert("NSE", Interval.D1, iid, g[BAR_COLUMNS])
+        for sym, g in allf.groupby("symbol"):
+            key = ("NSE", str(sym))
+            iid = self._iid_cache.get(key)
+            if iid is None:
+                first = g.iloc[-1]
+                iid = self.instruments.get_or_create("NSE", str(sym), isin=first.get("isin") or None,
+                                                     name=first.get("name"), series=first.get("series"))
+                self._iid_cache[key] = iid
+            self.bars.upsert("NSE", Interval.D1, iid, g.sort_values("ts")[BAR_COLUMNS])
             touched.add(iid)
         return touched
 

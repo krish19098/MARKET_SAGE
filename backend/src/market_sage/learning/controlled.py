@@ -61,10 +61,11 @@ def _holdout_eval(model: TrainedModel, hold: pd.DataFrame, clim_p: np.ndarray, c
 
 def run_learning_cycle(store: FeatureStore, registry: ModelRegistry, cutoff: date, *, is_synthetic: bool,
                        criteria: GateCriteria | None = None, contract: ForecastContract | None = None,
-                       n_folds: int = 4) -> CycleResult:
+                       n_folds: int = 4, universe_size: int = 200) -> CycleResult:
     criteria = criteria or GateCriteria()
     contract = contract or ForecastContract()
-    full = build_dataset(store, cutoff, contract)
+    # Universe chosen with information available at the cycle cutoff (liquidity ranking, point-in-time).
+    full = build_dataset(store, cutoff, contract, store.mds.liquid_universe(cutoff, universe_size))
     sessions = np.array(sorted(full["session_date"].unique()))
     if len(sessions) <= criteria.holdout_sessions + 400:
         raise ValueError("insufficient history for a learning cycle")

@@ -46,11 +46,13 @@ class DecisionPipeline:
         registry: ModelRegistry,
         costs: CostModel | None = None,
         store: FeatureStore | None = None,
+        universe_size: int = 200,
     ) -> None:
         self.mds, self.ledger, self.registry = mds, ledger, registry
         self.store = store or FeatureStore(mds)
         self.analyst = Analyst(self.store)
         self.costs = costs or CostModel.load()
+        self.universe_size = universe_size
 
     def model_ctx(self) -> ModelContext:
         return model_context(self.registry.load_production(TARGET))
@@ -68,8 +70,8 @@ class DecisionPipeline:
         """``now`` is the as-of time for data-freshness checks; ``created_at`` (default: wall clock) is the
         immutable creation timestamp written to the ledger, so replays never back-date records."""
         mctx = self.model_ctx()
-        ids = instrument_ids or [i["id"] for i in self.mds.instruments.all(include_indices=False)]
-        pool = self.store.universe_features(until=cutoff)
+        ids = instrument_ids or self.mds.liquid_universe(cutoff, self.universe_size)
+        pool = self.store.universe_features(until=cutoff, instrument_ids=ids)
         recs: list[Recommendation] = []
         pids: dict[int, str] = {}
         for iid in ids:

@@ -30,6 +30,8 @@ def ingest_job(c: Container, now: datetime) -> dict:
     if start > end:
         return {"skipped": "up to date"}
     rep = c.mds.ingest_nse_eod(start, end)
+    c.mds.ingest_nse_indices(start, end)
+    c.mds.ingest_nse_corporate_actions(start - timedelta(days=30), end + timedelta(days=30))
     c.store.clear()
     return {"sessions": rep.sessions, "rows": rep.rows, "issues": rep.issues, "status": rep.status}
 

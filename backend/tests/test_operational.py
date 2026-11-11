@@ -75,3 +75,18 @@ def test_timezone_boundary_close():
     late_utc = datetime(2026, 11, 3, 23, 30, tzinfo=UTC)
     assert cal.session_state(late_utc).phase == "closed"
     assert cal.latest_completed_session(late_utc) == date(2026, 11, 3)
+
+
+def test_nse_file_with_wrong_date_is_not_a_session(engine, tmp_path):
+    """Observed on live NSE archives: a non-trading date's URL served the previous session's file."""
+    mds = MarketDataService(engine, tmp_path / "d", ExchangeCalendar())
+
+    class StaleCopy(FakeNse):
+        def get(self, url, api=False):
+            return (FIX / "sample_sec_bhavdata_full.csv").read_bytes()  # always the 03-Nov file
+
+    rep = mds.ingest_nse_eod(date(2026, 11, 3), date(2026, 11, 4), client=StaleCopy())
+    assert rep.sessions == 1 and date(2026, 11, 4) in rep.missing_files
+    with engine.connect() as c:
+        checks = [r.check for r in c.execute(select(s.data_quality_issues))]
+    assert "file_date_mismatch" in checks

@@ -37,8 +37,10 @@ CAPABILITIES = ProviderCapabilities(
     max_days_per_request={Interval.D1: 1},  # one file per session
     rate_limits={"archive": RateLimit(per_second=0.5)},
     realtime=False,
-    verified=False,
-    notes="URL/format assumptions pending verification against live NSE archives.",
+    verified=True,
+    notes="Verified 2026-11-11 against live files: sec_bhavdata_full, UDiFF CM bhavcopy (0 close mismatches vs full "
+          "bhavcopy on 3,435 rows), EQUITY_L, ind_close_all, corporate-actions API (caBroadcastDate = PIT key). "
+          "Observed: a non-trading date's full-bhavcopy URL can serve the previous session's file (guarded).",
 )
 
 
@@ -129,6 +131,29 @@ def _finish(out: pd.DataFrame, received_ts: datetime, raw_file_id: int | None) -
     return out.reset_index(drop=True)
 
 
+def index_close_url(d: date) -> str:
+    return f"{ARCHIVE}/content/indices/ind_close_all_{d:%d%m%Y}.csv"
+
+
+def parse_index_closes(content: bytes, received_ts: datetime, raw_file_id: int | None) -> pd.DataFrame:
+    """Parse ``ind_close_all`` (all NSE indices, one row each). Index symbols are upper-cased names."""
+    df = pd.read_csv(io.BytesIO(content), dtype=str).rename(columns=lambda c: c.strip())
+    num = lambda c: pd.to_numeric(df[c].str.strip().replace({"-": None, "": None}), errors="coerce")  # noqa: E731
+    out = pd.DataFrame({
+        "symbol": df["Index Name"].str.strip().str.upper(), "isin": None, "series": "INDEX",
+        "name": df["Index Name"].str.strip(),
+        "session_date": pd.to_datetime(df["Index Date"].str.strip(), format="%d-%m-%Y").dt.date,
+        "open": num("Open Index Value"), "high": num("High Index Value"), "low": num("Low Index Value"),
+        "close": num("Closing Index Value"), "volume": num("Volume").fillna(0.0),
+        "turnover": num("Turnover (Rs. Cr.)") * 1e7, "trades": float("nan"),
+    })
+    out = out.drop_duplicates("symbol")
+    # some indices publish only a close: fill missing O/H/L with close so OHLC checks stay meaningful
+    for c in ("open", "high", "low"):
+        out[c] = out[c].fillna(out["close"])
+    return _finish(out.dropna(subset=["close"]), received_ts, raw_file_id)
+
+
 def parse_equity_list(content: bytes) -> pd.DataFrame:
     df = pd.read_csv(io.BytesIO(content), dtype=str).rename(columns=lambda c: c.strip())
     return pd.DataFrame(
@@ -144,6 +169,7 @@ def parse_equity_list(content: bytes) -> pd.DataFrame:
 
 _SPLIT = re.compile(r"(?:split|sub-?division).*?(?:rs\.?|re\.?)\s*([\d.]+).*?(?:rs\.?|re\.?)\s*([\d.]+)", re.I)
 _BONUS = re.compile(r"bonus\s*(\d+)\s*:\s*(\d+)", re.I)
+_RIGHTS = re.compile(r"rights\s*(\d+)\s*:\s*(\d+)", re.I)
 _DIV = re.compile(r"dividend.*?(?:rs\.?|re\.?)\s*([\d.]+)", re.I)
 
 
@@ -155,12 +181,17 @@ def parse_ca_subject(subject: str) -> tuple[str, float | None, float | None, flo
             return "split", old_fv / new_fv, 1.0, None
     if m := _BONUS.search(subject):
         return "bonus", float(m.group(1)), float(m.group(2)), None
+    if m := _RIGHTS.search(subject):
+        return "rights", float(m.group(1)), float(m.group(2)), None
+    if re.search(r"demerger|scheme of arrangement", subject, re.I):
+        return "demerger", None, None, None
     if m := _DIV.search(subject):
         return "dividend", None, None, float(m.group(1))
     return "other", None, None, None
 
 
-def parse_corporate_actions(records: list[dict[str, Any]]) -> list[tuple[str, CorporateAction]]:
+def parse_corporate_actions(records: list[dict[str, Any]]) -> list[tuple[str, CorporateAction, datetime | None]]:
+    """Returns (symbol, action, published_at). ``published_at`` = NSE broadcast time (point-in-time key)."""
     out = []
     for r in records:
         subject = str(r.get("subject", ""))
@@ -169,12 +200,17 @@ def parse_corporate_actions(records: list[dict[str, Any]]) -> list[tuple[str, Co
             ex = datetime.strptime(str(r.get("exDate", "")).strip(), "%d-%b-%Y").replace(tzinfo=IST).date()
         except ValueError:
             continue
-        out.append(
-            (
-                str(r.get("symbol", "")).strip(),
-                CorporateAction(0, ex, kind, num, den, cash, purpose=subject, source=PROVIDER),
-            )
-        )
+        pub = None
+        raw_pub = r.get("caBroadcastDate")
+        if raw_pub:
+            for fmt in ("%d-%b-%Y %H:%M:%S", "%d-%b-%Y %H:%M", "%d-%b-%Y"):
+                try:
+                    pub = datetime.strptime(str(raw_pub).strip(), fmt).replace(tzinfo=IST)
+                    break
+                except ValueError:
+                    continue
+        out.append((str(r.get("symbol", "")).strip(),
+                    CorporateAction(0, ex, kind, num, den, cash, purpose=subject, source=PROVIDER), pub))
     return out
 
 

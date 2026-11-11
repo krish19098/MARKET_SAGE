@@ -213,3 +213,11 @@ def test_raw_files_immutable(mds):
     with pytest.raises(Exception, match="append-only"):
         with mds.engine.begin() as c:
             c.execute(text("UPDATE raw_files SET sha256='x'"))
+
+
+def test_parse_index_closes():
+    df = nse_archive.parse_index_closes((FIX / "sample_ind_close_all.csv").read_bytes(), datetime.now(UTC), None)
+    assert list(df["symbol"]) == ["NIFTY 50", "NIFTY BANK", "SOME CLOSE-ONLY INDEX"]  # duplicates dropped
+    last = df.iloc[-1]
+    assert last["open"] == last["high"] == last["low"] == last["close"] == 500
+    assert df.iloc[0]["session_date"] == date(2026, 11, 3)

@@ -83,7 +83,8 @@ CAPABILITIES = ProviderCapabilities(
     },
     realtime=True,
     verified=False,
-    notes="Limits unverified; session invalidated daily at midnight IST; static IP only needed for orders (not used).",
+    notes="Scrip master verified live 2026-11-11 (163,238 records; 2,779 NSE equities parsed). REST/WS limits unverified "
+          "(need owner credentials); session invalidated daily at midnight IST; static IP only needed for orders (not used).",
 )
 
 

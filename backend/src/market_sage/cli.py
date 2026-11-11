@@ -56,9 +56,21 @@ def cmd_vapid_keys(_: argparse.Namespace) -> None:
 
 
 def cmd_ingest_nse(a: argparse.Namespace) -> None:
+    """Equities (OHLCV + delivery), index closes, then corporate actions (quarterly chunks, PIT broadcast time)."""
+    from datetime import timedelta
+
     c = _container()
-    rep = c.mds.ingest_nse_eod(date.fromisoformat(a.start), date.fromisoformat(a.end))
-    print(json.dumps(rep.__dict__, default=str, indent=2))
+    start, end = date.fromisoformat(a.start), date.fromisoformat(a.end)
+    rep = c.mds.ingest_nse_eod(start, end)
+    print("equities:", json.dumps({k: v for k, v in rep.__dict__.items() if k != "missing_files"}, default=str))
+    rep_i = c.mds.ingest_nse_indices(start, end)
+    print("indices:", rep_i.sessions, "sessions,", rep_i.rows, "rows")
+    cur, n = start, 0
+    while cur <= end:
+        nxt = min(cur + timedelta(days=90), end)
+        n += c.mds.ingest_nse_corporate_actions(cur, nxt).rows
+        cur = nxt + timedelta(days=1)
+    print("corporate actions stored:", n)
 
 
 def cmd_post_close(_: argparse.Namespace) -> None:
